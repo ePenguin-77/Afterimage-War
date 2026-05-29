@@ -103,15 +103,17 @@ export const MonkClass: FighterClass = {
     self.stats.palmBurstUses += 1;
     game.spawnPalmBurstEffect(self.position, radius, this.secondaryColor);
     game.spawnAbilityText("PALM BURST", this.secondaryColor, self.position);
-    if (distance(self.position, enemy.position) <= radius + enemy.radius) {
-      const hpBefore = enemy.hp;
-      const hit = enemy.takeDamage(damage, self, game, {
+    const targets = game.getEnemies(self).filter((target) => distance(self.position, target.position) <= radius + target.radius);
+    const fallbackTargets = targets.length > 0 ? targets : distance(self.position, enemy.position) <= radius + enemy.radius ? [enemy] : [];
+    for (const target of fallbackTargets) {
+      const hpBefore = target.hp;
+      const hit = target.takeDamage(damage, self, game, {
         knockback: 0,
         hitColor: this.secondaryColor,
         ignoreCooldown: true,
         damageKind: "ability"
       });
-      const dealt = hit ? Math.max(0, hpBefore - enemy.hp) : 0;
+      const dealt = hit ? Math.max(0, hpBefore - target.hp) : 0;
       if (dealt > 0) {
         self.stats.palmBurstHits += 1;
         self.stats.palmBurstDamage += dealt;

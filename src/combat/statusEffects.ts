@@ -2,7 +2,7 @@ import type { Game } from "../Game";
 import type { Fighter } from "../entities/Fighter";
 import { BALANCE } from "../tuning";
 
-export type StatusEffectType = "burn" | "poison" | "gravity-mark" | "gravity-well" | "death-mark";
+export type StatusEffectType = "burn" | "poison" | "bleed" | "gravity-mark" | "gravity-well" | "death-mark";
 
 export type BurnOptions = {
   damagePerSecond: number;
@@ -12,6 +12,13 @@ export type BurnOptions = {
 };
 
 export type PoisonOptions = {
+  damagePerSecond: number;
+  duration: number;
+  stacks: number;
+  maxStacks: number;
+};
+
+export type BleedOptions = {
   damagePerSecond: number;
   duration: number;
   stacks: number;
@@ -48,6 +55,7 @@ export type StatusEffect = {
 
 const BURN_TICK_INTERVAL = 0.5;
 const POISON_TICK_INTERVAL = 0.5;
+const BLEED_TICK_INTERVAL = 0.5;
 
 export function applyBurn(target: Fighter, source: Fighter, options: BurnOptions): void {
   const duration = getEffectiveBurnDuration(target, options.duration);
@@ -93,6 +101,31 @@ export function applyPoison(target: Fighter, source: Fighter, options: PoisonOpt
     tickTimer: POISON_TICK_INTERVAL,
     visualTimer: 0
   });
+}
+
+export function applyBleed(target: Fighter, source: Fighter, options: BleedOptions): void {
+  const duration = getEffectiveBleedDuration(target, options.duration);
+  const existing = target.statusEffects.find((effect) => effect.type === "bleed" && effect.source === source);
+  if (existing) {
+    existing.remaining = Math.max(existing.remaining, duration);
+    existing.stacks = Math.min(options.maxStacks, existing.stacks + options.stacks);
+    existing.damagePerSecond = options.damagePerSecond;
+    existing.maxStacks = options.maxStacks;
+    source.stats.bleedStacksApplied += options.stacks;
+    return;
+  }
+
+  target.statusEffects.push({
+    type: "bleed",
+    source,
+    remaining: duration,
+    stacks: Math.min(options.maxStacks, options.stacks),
+    maxStacks: options.maxStacks,
+    damagePerSecond: options.damagePerSecond,
+    tickTimer: BLEED_TICK_INTERVAL,
+    visualTimer: 0
+  });
+  source.stats.bleedStacksApplied += options.stacks;
 }
 
 export function applyGravityStatus(target: Fighter, source: Fighter, options: GravityStatusOptions): void {
@@ -165,6 +198,15 @@ function getEffectivePoisonDuration(target: Fighter, duration: number): number {
   return nextDuration;
 }
 
+function getEffectiveBleedDuration(target: Fighter, duration: number): number {
+  let nextDuration = duration * target.runModifiers.statusTakenDurationMultiplier;
+  if (target.classDef.id === "thunder") {
+    nextDuration *= BALANCE.thunder.burnDurationMultiplier;
+  }
+
+  return nextDuration;
+}
+
 function getEffectiveGravityDuration(target: Fighter, duration: number): number {
   let nextDuration = duration * target.runModifiers.statusTakenDurationMultiplier;
   if (target.classDef.id === "thunder") {
@@ -215,6 +257,25 @@ export function updateStatusEffects(target: Fighter, dt: number, game: Game): vo
       if (effect.visualTimer <= 0) {
         effect.visualTimer = Math.max(0.1, 0.28 - effect.stacks * 0.04);
         game.spawnPoisonSpark(target.position, "#9eff58");
+      }
+    } else if (effect.type === "bleed") {
+      effect.source.stats.bleedUptime += dt;
+      effect.source.stats.bloodScentUptime += dt;
+      effect.tickTimer -= dt;
+      effect.visualTimer -= dt;
+
+      if (effect.tickTimer <= 0) {
+        effect.tickTimer += BLEED_TICK_INTERVAL;
+        target.takeDamage(effect.damagePerSecond * effect.stacks * BLEED_TICK_INTERVAL, effect.source, game, {
+          hitColor: "#c91f37",
+          ignoreCooldown: true,
+          damageKind: "bleed"
+        });
+      }
+
+      if (effect.visualTimer <= 0) {
+        effect.visualTimer = Math.max(0.1, 0.3 - effect.stacks * 0.045);
+        game.spawnBleedSpark(target.position, "#c91f37");
       }
     } else if (effect.type === "gravity-mark" || effect.type === "gravity-well") {
       effect.visualTimer -= dt;
@@ -284,6 +345,12 @@ export function getPoisonAbilityChargeMultiplier(target: Fighter): number {
 export function getDeathMarkStacks(target: Fighter, source?: Fighter): number {
   return target.statusEffects
     .filter((effect) => effect.type === "death-mark" && (!source || effect.source === source))
+    .reduce((total, effect) => total + effect.stacks, 0);
+}
+
+export function getBleedStacks(target: Fighter, source?: Fighter): number {
+  return target.statusEffects
+    .filter((effect) => effect.type === "bleed" && (!source || effect.source === source))
     .reduce((total, effect) => total + effect.stacks, 0);
 }
 

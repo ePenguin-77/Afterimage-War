@@ -9,6 +9,8 @@ import { Fighter, createFighterStats, type FighterStats } from "./entities/Fight
 import { Bomb } from "./entities/Bomb";
 import { MirrorDecoy } from "./entities/MirrorDecoy";
 import { Projectile } from "./entities/Projectile";
+import { PortalGate } from "./entities/PortalGate";
+import { VectorLine } from "./entities/VectorLine";
 import { Particle, burstParticles } from "./effects/Particle";
 import { CircleCollisionResult, resolveCircleCollision } from "./physics";
 import { cloneLeaguePlayerModifiers, createLeagueRunState, prepareNextOpponent, promotePreparedOpponent } from "./run/LeagueRunMode";
@@ -67,21 +69,21 @@ type GameState =
   | "league-over"
   | "league-cleared";
 
-type MainMode = "quick" | "league";
+type MainMode = "quick" | "league" | "chaos";
 
 type ClassCardRect = Rect & {
-  fighterIndex: 0 | 1;
+  fighterIndex: number;
   classId: string;
   locked: boolean;
 };
 
 type ClassSelectorButtonRect = ButtonRect & {
-  fighterIndex: 0 | 1;
+  fighterIndex: number;
   direction: -1 | 1;
 };
 
 type ClassDetailButtonRect = ButtonRect & {
-  fighterIndex: 0 | 1;
+  fighterIndex: number;
 };
 
 type ClassDetailTab = "overview" | "skill" | "build";
@@ -89,6 +91,31 @@ type ClassDetailTab = "overview" | "skill" | "build";
 type ClassDetailTabRect = ButtonRect & {
   tab: ClassDetailTab;
 };
+
+function withAlpha(color: string, alpha: number): string {
+  if (!color.startsWith("#")) {
+    return color;
+  }
+  const hex = color.slice(1);
+  if (hex.length !== 3 && hex.length !== 6) {
+    return color;
+  }
+  const normalized =
+    hex.length === 3
+      ? hex
+          .split("")
+          .map((part) => `${part}${part}`)
+          .join("")
+      : hex;
+  const value = Number.parseInt(normalized, 16);
+  if (!Number.isFinite(value)) {
+    return color;
+  }
+  const r = (value >> 16) & 255;
+  const g = (value >> 8) & 255;
+  const b = value & 255;
+  return `rgba(${r},${g},${b},${clamp(alpha, 0, 1)})`;
+}
 
 type LightningEffect = {
   from: Vec2;
@@ -130,6 +157,8 @@ type FighterResultSummary = {
   className: string;
   finalHp: number;
   stats: FighterStats;
+  placement?: number;
+  kos?: number;
 };
 
 type MatchSummary = {
@@ -137,7 +166,7 @@ type MatchSummary = {
   loserName: string;
   duration: number;
   winnerHp: number;
-  fighters: [FighterResultSummary, FighterResultSummary];
+  fighters: FighterResultSummary[];
 };
 
 type BalanceTestResult = {
@@ -208,7 +237,7 @@ export class Game {
   readonly fixedDt = 1 / 60;
   canvas: HTMLCanvasElement;
   ctx: CanvasRenderingContext2D;
-  fighters: [Fighter, Fighter];
+  fighters: Fighter[];
   projectiles: Projectile[] = [];
   bombs: Bomb[] = [];
   mirrorDecoys: MirrorDecoy[] = [];
@@ -216,9 +245,14 @@ export class Game {
   lightningEffects: LightningEffect[] = [];
   toxicClouds: ToxicCloud[] = [];
   gravityWells: GravityWell[] = [];
+  portalGates: PortalGate[] = [];
+  vectorLines: VectorLine[] = [];
   gameState: GameState = "class-select";
   selectedMode: MainMode = "quick";
   selectedClassIds: [string, string] = [ChronoClass.id, BladeClass.id];
+  chaosClassIds: [string, string, string, string] = [ChronoClass.id, BladeClass.id, "shield", "fire"];
+  chaosFighterCount = 4;
+  chaosSelectedSlot = 0;
   classSelectCards: ClassCardRect[] = [];
   classSelectorButtons: ClassSelectorButtonRect[] = [];
   classDetailButtons: ClassDetailButtonRect[] = [];
@@ -265,10 +299,16 @@ export class Game {
   accumulator = 0;
   fps = 60;
   restartButton: ButtonRect = { x: 196, y: 964, w: 184, h: 42, label: "RESTART" };
-  quickModeButton: ButtonRect = { x: 108, y: 94, w: 170, h: 34, label: "QUICK BATTLE" };
-  leagueModeButton: ButtonRect = { x: 298, y: 94, w: 170, h: 34, label: "LEAGUE RUN" };
+  quickModeButton: ButtonRect = { x: 54, y: 112, w: 146, h: 34, label: "QUICK BATTLE" };
+  leagueModeButton: ButtonRect = { x: 215, y: 112, w: 146, h: 34, label: "LEAGUE RUN" };
+  chaosModeButton: ButtonRect = { x: 376, y: 112, w: 146, h: 34, label: "CHAOS ARENA" };
+  chaosCountButtons: ButtonRect[] = [
+    { x: 72, y: 204, w: 130, h: 34, label: "2 FIGHTERS" },
+    { x: 223, y: 204, w: 130, h: 34, label: "3 FIGHTERS" },
+    { x: 374, y: 204, w: 130, h: 34, label: "4 FIGHTERS" }
+  ];
   matrixModeButton: ButtonRect = { x: 384, y: 94, w: 154, h: 34, label: "MATCHUP MATRIX" };
-  startBattleButton: ButtonRect = { x: 128, y: 764, w: 320, h: 54, label: "START BATTLE" };
+  startBattleButton: ButtonRect = { x: 108, y: 806, w: 360, h: 64, label: "START BATTLE" };
   startLeagueButton: ButtonRect = { x: 128, y: 764, w: 320, h: 54, label: "START LEAGUE RUN" };
   restartSameButton: ButtonRect = { x: 54, y: 888, w: 222, h: 54, label: "RESTART SAME" };
   classSelectButton: ButtonRect = { x: 300, y: 888, w: 222, h: 54, label: "CLASS SELECT" };
@@ -341,7 +381,11 @@ export class Game {
       return;
     }
 
-    this.fighters = this.physicsTestMode ? this.createPhysicsTestFighters() : this.createFighters();
+    this.fighters = this.physicsTestMode
+      ? this.createPhysicsTestFighters()
+      : this.selectedMode === "chaos"
+        ? this.createChaosFighters()
+        : this.createFighters();
     this.projectiles = [];
     this.bombs = [];
     this.mirrorDecoys = [];
@@ -349,6 +393,8 @@ export class Game {
     this.lightningEffects = [];
     this.toxicClouds = [];
     this.gravityWells = [];
+    this.portalGates = [];
+    this.vectorLines = [];
     this.leagueRewardCards = [];
     this.time = 0;
     this.winner = null;
@@ -365,6 +411,11 @@ export class Game {
     this.accumulator = 0;
   }
 
+  private startChaosArena(): void {
+    this.selectedMode = "chaos";
+    this.restart();
+  }
+
   backToClassSelect(): void {
     this.projectiles = [];
     this.bombs = [];
@@ -373,6 +424,8 @@ export class Game {
     this.lightningEffects = [];
     this.toxicClouds = [];
     this.gravityWells = [];
+    this.portalGates = [];
+    this.vectorLines = [];
     this.time = 0;
     this.winner = null;
     this.koLoser = null;
@@ -412,6 +465,8 @@ export class Game {
     this.lightningEffects = [];
     this.toxicClouds = [];
     this.gravityWells = [];
+    this.portalGates = [];
+    this.vectorLines = [];
     this.time = 0;
     this.winner = null;
     this.koLoser = null;
@@ -558,7 +613,61 @@ export class Game {
   }
 
   getEnemyOf(fighter: Fighter): Fighter {
-    return this.fighters[0] === fighter ? this.fighters[1] : this.fighters[0];
+    return this.getNearestEnemy(fighter) ?? this.fighters.find((candidate) => candidate !== fighter) ?? fighter;
+  }
+
+  getEnemies(fighter: Fighter): Fighter[] {
+    return this.fighters.filter((candidate) => candidate !== fighter && !candidate.defeated);
+  }
+
+  getNearestEnemy(fighter: Fighter): Fighter | null {
+    return this.getEnemies(fighter).sort((a, b) => fighter.distanceTo(a) - fighter.distanceTo(b))[0] ?? null;
+  }
+
+  getProjectileTargets(owner: Fighter): Fighter[] {
+    return this.getEnemies(owner).sort((a, b) => distance(owner.position, a.position) - distance(owner.position, b.position));
+  }
+
+  registerFighterKo(fighter: Fighter, _source: Fighter): void {
+    if (this.selectedMode !== "chaos" || this.physicsTestMode) {
+      return;
+    }
+
+    const started = fighter.beginChaosKo();
+    if (!started) {
+      return;
+    }
+
+    this.projectiles = this.projectiles.filter((projectile) => projectile.owner !== fighter);
+    this.bombs = this.bombs.filter((bomb) => bomb.owner !== fighter);
+    this.mirrorDecoys = this.mirrorDecoys.filter((decoy) => decoy.owner !== fighter);
+    this.toxicClouds = this.toxicClouds.filter((cloud) => cloud.owner !== fighter);
+    this.gravityWells = this.gravityWells.filter((well) => well.owner !== fighter);
+    this.portalGates = this.portalGates.filter((gate) => gate.owner !== fighter);
+    this.vectorLines = this.vectorLines.filter((line) => line.owner !== fighter);
+    this.spawnChaosKoEffect(fighter);
+  }
+
+  private spawnChaosKoEffect(fighter: Fighter): void {
+    if (this.isFastSimulation) {
+      return;
+    }
+
+    const color = fighter.classDef.id === "glass" ? "#dff6ff" : fighter.classDef.secondaryColor;
+    burstParticles(this.particles, fighter.position, color, fighter.classDef.id === "glass" ? 18 : 12, 80, 280, "shard");
+    burstParticles(this.particles, fighter.position, "rgba(20,20,26,0.38)", 5, 34, 130, "circle");
+    this.particles.push(
+      new Particle({
+        position: { x: fighter.position.x, y: fighter.position.y - 44 },
+        velocity: { x: randomRange(-14, 14), y: -78 },
+        life: 0.62,
+        color: "#ffffff",
+        size: 20,
+        kind: "damageText",
+        text: "KO"
+      })
+    );
+    this.addShake(fighter.classDef.id === "glass" ? 7 : 5);
   }
 
   private clearTransientBattleState(): void {
@@ -569,6 +678,8 @@ export class Game {
     this.lightningEffects = [];
     this.toxicClouds = [];
     this.gravityWells = [];
+    this.portalGates = [];
+    this.vectorLines = [];
     this.time = 0;
     this.winner = null;
     this.koLoser = null;
@@ -857,6 +968,26 @@ export class Game {
     );
   }
 
+  spawnPortalExitPulse(position: Vec2, radius: number, color: string): void {
+    if (this.isFastSimulation) {
+      return;
+    }
+
+    burstParticles(this.particles, position, color, 10, 62, 190, "spark");
+    burstParticles(this.particles, position, "rgba(255,255,255,0.62)", 4, 36, 120, "circle");
+    this.particles.push(
+      new Particle({
+        position,
+        velocity: { x: 0, y: 0 },
+        life: 0.34,
+        color: "rgba(48, 217, 255, 0.46)",
+        size: radius,
+        kind: "circle"
+      })
+    );
+    this.addShake(3.4);
+  }
+
   spawnVampireSpark(position: Vec2, color: string): void {
     if (this.isFastSimulation) {
       return;
@@ -1051,6 +1182,24 @@ export class Game {
         color,
         size: randomRange(9, 19),
         kind: Math.random() < 0.7 ? "shard" : "spark",
+        rotation: randomRange(0, TAU)
+      })
+    );
+  }
+
+  spawnBleedSpark(position: Vec2, color: string): void {
+    if (this.isFastSimulation) {
+      return;
+    }
+
+    this.particles.push(
+      new Particle({
+        position: { x: position.x + randomRange(-24, 24), y: position.y + randomRange(-24, 24) },
+        velocity: fromAngle(randomRange(0, TAU), randomRange(34, 135)),
+        life: randomRange(0.18, 0.42),
+        color,
+        size: randomRange(6, 14),
+        kind: Math.random() < 0.58 ? "circle" : "shard",
         rotation: randomRange(0, TAU)
       })
     );
@@ -1312,7 +1461,7 @@ export class Game {
     this.shake = Math.max(this.shake, amount);
   }
 
-  private createFighters(): [Fighter, Fighter] {
+  private createFighters(): Fighter[] {
     const fighterAClass = getFighterClass(this.selectedClassIds[0]);
     const fighterBClass = getFighterClass(this.selectedClassIds[1]);
     const fighterA = new Fighter("left", fighterAClass, {
@@ -1337,7 +1486,7 @@ export class Game {
     return [fighterA, fighterB];
   }
 
-  private createPhysicsTestFighters(): [Fighter, Fighter] {
+  private createPhysicsTestFighters(): Fighter[] {
     const bounds = this.arenaInner;
     const chrono = new Fighter("left", getFighterClass(ChronoClass.id), {
       x: bounds.x + bounds.w * 0.34,
@@ -1353,6 +1502,64 @@ export class Game {
     chrono.hp = chrono.maxHP;
     blade.hp = blade.maxHP;
     return [chrono, blade];
+  }
+
+  private createChaosFighters(): Fighter[] {
+    const bounds = this.arenaInner;
+    const count = clamp(Math.floor(this.chaosFighterCount), 2, 4);
+    const spawnData: Array<{ position: Vec2; velocity: Vec2 }> =
+      count === 2
+        ? [
+            {
+              position: { x: bounds.x + bounds.w * 0.25, y: bounds.y + bounds.h * 0.45 },
+              velocity: { x: 1, y: 0.35 }
+            },
+            {
+              position: { x: bounds.x + bounds.w * 0.75, y: bounds.y + bounds.h * 0.55 },
+              velocity: { x: -1, y: -0.35 }
+            }
+          ]
+        : count === 3
+          ? [
+              {
+                position: { x: bounds.x + bounds.w * 0.5, y: bounds.y + bounds.h * 0.22 },
+                velocity: { x: 0.25, y: 1 }
+              },
+              {
+                position: { x: bounds.x + bounds.w * 0.22, y: bounds.y + bounds.h * 0.72 },
+                velocity: { x: 1, y: -0.45 }
+              },
+              {
+                position: { x: bounds.x + bounds.w * 0.78, y: bounds.y + bounds.h * 0.72 },
+                velocity: { x: -1, y: -0.45 }
+              }
+            ]
+          : [
+              {
+                position: { x: bounds.x + bounds.w * 0.24, y: bounds.y + bounds.h * 0.24 },
+                velocity: { x: 1, y: 0.72 }
+              },
+              {
+                position: { x: bounds.x + bounds.w * 0.76, y: bounds.y + bounds.h * 0.24 },
+                velocity: { x: -1, y: 0.72 }
+              },
+              {
+                position: { x: bounds.x + bounds.w * 0.24, y: bounds.y + bounds.h * 0.76 },
+                velocity: { x: 1, y: -0.72 }
+              },
+              {
+                position: { x: bounds.x + bounds.w * 0.76, y: bounds.y + bounds.h * 0.76 },
+                velocity: { x: -1, y: -0.72 }
+              }
+            ];
+
+    return spawnData.slice(0, count).map((spawn, index) => {
+      const classDef = getFighterClass(this.chaosClassIds[index]);
+      const fighter = new Fighter(`chaos-${index}`, classDef, spawn.position);
+      fighter.setVelocity(makeVelocity(spawn.velocity.x, spawn.velocity.y, fighter.targetMoveSpeed), "spawn");
+      fighter.hp = fighter.maxHP;
+      return fighter;
+    });
   }
 
   private loop(frameTime: number): void {
@@ -1391,23 +1598,38 @@ export class Game {
 
     if (this.gameState === "ko-freeze") {
       this.koTimer = Math.max(0, this.koTimer - dt);
+      this.updateChaosKoFades(dt);
       if (this.koTimer <= 0) {
         this.finishKoFreeze();
       }
     }
 
     if (this.gameState === "battle" && !this.winner) {
-      this.fighters[0].update(dt, this, this.fighters[1]);
-      this.fighters[1].update(dt, this, this.fighters[0]);
+      for (const fighter of this.fighters) {
+        const enemy = this.getEnemyOf(fighter);
+        if (!fighter.defeated && enemy !== fighter) {
+          fighter.update(dt, this, enemy);
+        }
+      }
       this.resolveFighterCollision();
 
       if (this.physicsTestMode) {
         this.projectiles = [];
         this.bombs = [];
         this.mirrorDecoys = [];
+        this.portalGates = [];
+        this.vectorLines = [];
       } else {
         this.updateToxicClouds(dt);
         this.updateGravityWells(dt);
+        for (const portalGate of this.portalGates) {
+          portalGate.update(dt);
+        }
+        this.portalGates = this.portalGates.filter((gate) => gate.active);
+        for (const vectorLine of this.vectorLines) {
+          vectorLine.update(dt, this);
+        }
+        this.vectorLines = this.vectorLines.filter((line) => line.active);
         for (const decoy of this.mirrorDecoys) {
           decoy.update(dt, this);
         }
@@ -1423,18 +1645,8 @@ export class Game {
       }
 
       if (!this.physicsTestMode) {
-        const defeatedFighters = this.fighters.filter((fighter) => fighter.defeated);
-        const defeated = defeatedFighters[0];
-        if (defeated) {
-          const winner = defeatedFighters.length > 1
-            ? this.fighters.reduce((best, fighter) => (fighter.stats.damageDealt > best.stats.damageDealt ? fighter : best), this.fighters[0])
-            : this.getEnemyOf(defeated);
-          if (this.isFastSimulation) {
-            this.finishBattle(winner, this.getEnemyOf(winner));
-          } else {
-            this.beginKoFreeze(winner, this.getEnemyOf(winner));
-          }
-        }
+        this.updateChaosKoFades(dt);
+        this.checkBattleWinCondition();
       }
     }
 
@@ -1446,6 +1658,53 @@ export class Game {
       lightning.life -= dt;
     }
     this.lightningEffects = this.lightningEffects.filter((lightning) => lightning.life > 0);
+  }
+
+  private updateChaosKoFades(dt: number): void {
+    if (this.selectedMode !== "chaos") {
+      return;
+    }
+
+    for (const fighter of this.fighters) {
+      fighter.updateChaosKo(dt);
+    }
+  }
+
+  private checkBattleWinCondition(): void {
+    const alive = this.fighters.filter((fighter) => !fighter.defeated);
+    if (this.selectedMode === "chaos") {
+      if (alive.length > 1) {
+        return;
+      }
+      const winner =
+        alive[0] ??
+        this.fighters.reduce((best, fighter) => (fighter.stats.damageDealt > best.stats.damageDealt ? fighter : best), this.fighters[0]);
+      const loser =
+        this.fighters
+          .filter((fighter) => fighter !== winner)
+          .sort((a, b) => b.stats.damageDealt - a.stats.damageDealt)[0] ?? winner;
+      if (this.isFastSimulation) {
+        this.finishBattle(winner, loser);
+      } else {
+        this.beginKoFreeze(winner, loser);
+      }
+      return;
+    }
+
+    const defeatedFighters = this.fighters.filter((fighter) => fighter.defeated);
+    const defeated = defeatedFighters[0];
+    if (!defeated) {
+      return;
+    }
+    const winner =
+      defeatedFighters.length > 1
+        ? this.fighters.reduce((best, fighter) => (fighter.stats.damageDealt > best.stats.damageDealt ? fighter : best), this.fighters[0])
+        : this.getEnemyOf(defeated);
+    if (this.isFastSimulation) {
+      this.finishBattle(winner, this.getEnemyOf(winner));
+    } else {
+      this.beginKoFreeze(winner, this.getEnemyOf(winner));
+    }
   }
 
   private updateToxicClouds(dt: number): void {
@@ -1467,23 +1726,24 @@ export class Game {
       }
 
       cloud.tickTimer = cloud.tickInterval;
-      const enemy = this.getEnemyOf(cloud.owner);
-      if (enemy.defeated || distance(enemy.position, cloud.position) > cloud.radius + enemy.radius) {
-        continue;
-      }
+      for (const enemy of this.getEnemies(cloud.owner)) {
+        if (distance(enemy.position, cloud.position) > cloud.radius + enemy.radius) {
+          continue;
+        }
 
-      enemy.takeDamage(cloud.directDamage, cloud.owner, this, {
-        hitColor: "#9eff58",
-        ignoreCooldown: true,
-        damageKind: "poison"
-      });
-      applyPoison(enemy, cloud.owner, {
-        damagePerSecond: BALANCE.poison.poisonDamagePerSecond,
-        duration: cloud.poisonDuration,
-        stacks: cloud.poisonStacks,
-        maxStacks: BALANCE.poison.maxPoisonStacks
-      });
-      this.spawnPoisonSpark(enemy.position, "#9eff58");
+        enemy.takeDamage(cloud.directDamage, cloud.owner, this, {
+          hitColor: "#9eff58",
+          ignoreCooldown: true,
+          damageKind: "poison"
+        });
+        applyPoison(enemy, cloud.owner, {
+          damagePerSecond: BALANCE.poison.poisonDamagePerSecond,
+          duration: cloud.poisonDuration,
+          stacks: cloud.poisonStacks,
+          maxStacks: BALANCE.poison.maxPoisonStacks
+        });
+        this.spawnPoisonSpark(enemy.position, "#9eff58");
+      }
     }
 
     this.toxicClouds = this.toxicClouds.filter((cloud) => cloud.duration > 0 && !cloud.owner.defeated);
@@ -1508,27 +1768,32 @@ export class Game {
         continue;
       }
 
-      const enemy = this.getEnemyOf(well.owner);
-      well.lastDistance = enemy.defeated ? Number.POSITIVE_INFINITY : distance(enemy.position, well.position);
-      const enemyInside = !enemy.defeated && well.lastDistance <= well.radius + enemy.radius;
-      well.enemyInside = enemyInside;
-      if (!enemyInside) {
-        continue;
-      }
+      let anyInside = false;
+      let nearestDistance = Number.POSITIVE_INFINITY;
+      for (const enemy of this.getEnemies(well.owner)) {
+        const enemyDistance = distance(enemy.position, well.position);
+        nearestDistance = Math.min(nearestDistance, enemyDistance);
+        const enemyInside = enemyDistance <= well.radius + enemy.radius;
+        if (!enemyInside) {
+          continue;
+        }
+        anyInside = true;
+        const wasAlreadySuppressed = enemy.statusEffects.some((effect) => effect.type === "gravity-well" && effect.source === well.owner);
+        applyGravityStatus(enemy, well.owner, {
+          type: "gravity-well",
+          duration: Math.max(0.24, this.fixedDt * 4),
+          speedMultiplier: well.speedMultiplier,
+          abilityChargeMultiplier: well.abilityChargeMultiplier,
+          restitutionMultiplier: well.restitutionMultiplier
+        });
+        enemy.normalizeToTargetSpeed("status-speed-only");
 
-      const wasAlreadySuppressed = enemy.statusEffects.some((effect) => effect.type === "gravity-well" && effect.source === well.owner);
-      applyGravityStatus(enemy, well.owner, {
-        type: "gravity-well",
-        duration: Math.max(0.24, this.fixedDt * 4),
-        speedMultiplier: well.speedMultiplier,
-        abilityChargeMultiplier: well.abilityChargeMultiplier,
-        restitutionMultiplier: well.restitutionMultiplier
-      });
-      enemy.normalizeToTargetSpeed("status-speed-only");
-
-      if (!wasAlreadySuppressed) {
-        this.spawnAbilityText("GRAVITY", well.owner.classDef.secondaryColor, enemy.position);
+        if (!wasAlreadySuppressed) {
+          this.spawnAbilityText("GRAVITY", well.owner.classDef.secondaryColor, enemy.position);
+        }
       }
+      well.lastDistance = nearestDistance;
+      well.enemyInside = anyInside;
 
     }
 
@@ -1536,7 +1801,19 @@ export class Game {
   }
 
   private resolveFighterCollision(): void {
-    const [a, b] = this.fighters;
+    for (let i = 0; i < this.fighters.length; i += 1) {
+      for (let j = i + 1; j < this.fighters.length; j += 1) {
+        const a = this.fighters[i];
+        const b = this.fighters[j];
+        if (a.defeated || b.defeated) {
+          continue;
+        }
+        this.resolveFighterCollisionPair(a, b);
+      }
+    }
+  }
+
+  private resolveFighterCollisionPair(a: Fighter, b: Fighter): void {
     const collision = resolveCircleCollision(a, b, MOVEMENT.ballRestitution);
     if (!collision.collided) {
       return;
@@ -1665,6 +1942,25 @@ export class Game {
           this.spawnAbilityText("SHADOW STRIKE", attacker.classDef.secondaryColor, collision.point);
         }
       }
+      if (hit && attacker.classDef.id === "fang") {
+        attacker.stats.fangContactHits += 1;
+        attacker.stats.rendingHuntDamageBonus += contactResult.bonusDamage ?? 0;
+        this.spawnBleedSpark(collision.point, "#c91f37");
+        if (contactResult.highImpact) {
+          this.spawnAbilityText("REND", attacker.classDef.secondaryColor, collision.point);
+        }
+      }
+      if (hit && attacker.classDef.id === "portal") {
+        const bonus = contactResult.bonusDamage ?? 0;
+        if (bonus > 0) {
+          attacker.stats.riftStrikeHits += 1;
+          attacker.stats.riftStrikeDamage += bonus;
+          attacker.customState.portalRiftStrikeTimer = 0;
+          attacker.customState.portalRiftStrikeBonus = 0;
+          this.spawnAbilityText("RIFT STRIKE", attacker.classDef.secondaryColor, collision.point);
+        }
+        this.spawnGravitySpark(collision.point, attacker.classDef.secondaryColor);
+      }
       if (hit && attacker.classDef.id === "blade") {
         this.spawnSlashBurst(collision.point, Math.atan2(collision.normal.y, collision.normal.x));
       }
@@ -1698,16 +1994,35 @@ export class Game {
       loserName: loser.classDef.displayName,
       duration: this.time,
       winnerHp: winner.hp,
-      fighters: [this.createFighterResult(this.fighters[0]), this.createFighterResult(this.fighters[1])]
+      fighters: this.createRankedFighterResults(winner)
     };
   }
 
-  private createFighterResult(fighter: Fighter): FighterResultSummary {
+  private createRankedFighterResults(winner: Fighter): FighterResultSummary[] {
+    const ranked = [...this.fighters].sort((a, b) => {
+      if (a === winner) {
+        return -1;
+      }
+      if (b === winner) {
+        return 1;
+      }
+      if (a.defeated !== b.defeated) {
+        return a.defeated ? 1 : -1;
+      }
+      return b.hp - a.hp || b.stats.damageDealt - a.stats.damageDealt;
+    });
+    return ranked.map((fighter, index) => this.createFighterResult(fighter, index + 1));
+  }
+
+  private createFighterResult(fighter: Fighter, placement?: number): FighterResultSummary {
+    const fighterIndex = this.fighters.indexOf(fighter);
     return {
-      label: fighter.id === "left" ? "Fighter A" : "Fighter B",
+      label: fighterLabelFor(fighter, fighterIndex >= 0 ? fighterIndex : 0),
       className: fighter.classDef.displayName,
       finalHp: fighter.hp,
-      stats: cloneStats(fighter.stats)
+      stats: cloneStats(fighter.stats),
+      placement,
+      kos: fighter.stats.kos
     };
   }
 
@@ -1723,6 +2038,8 @@ export class Game {
     this.lightningEffects = [];
     this.toxicClouds = [];
     this.gravityWells = [];
+    this.portalGates = [];
+    this.vectorLines = [];
     this.time = 0;
     this.winner = null;
     this.koLoser = null;
@@ -2282,6 +2599,12 @@ export class Game {
     this.drawArena(ctx);
     this.drawToxicClouds(ctx);
     this.drawGravityWells(ctx);
+    for (const portalGate of this.portalGates) {
+      portalGate.draw(ctx, this.time);
+    }
+    for (const vectorLine of this.vectorLines) {
+      vectorLine.draw(ctx, this.time);
+    }
     for (const decoy of this.mirrorDecoys) {
       decoy.draw(ctx, this.time);
     }
@@ -2293,10 +2616,17 @@ export class Game {
     }
     this.drawLightningEffects(ctx);
     for (const fighter of this.fighters) {
+      if (this.selectedMode === "chaos" && fighter.chaosKoHidden) {
+        continue;
+      }
       if (this.selectedMode === "league" && this.leagueRun?.bossRound && fighter.id === "right") {
         this.drawBossAura(ctx, fighter);
       }
-      fighter.draw(ctx, this.time);
+      if (this.selectedMode === "chaos" && fighter.defeated) {
+        fighter.drawChaosKo(ctx, this.time);
+      } else {
+        fighter.draw(ctx, this.time);
+      }
     }
     for (const particle of this.particles) {
       particle.draw(ctx);
@@ -2383,30 +2713,36 @@ export class Game {
     this.classSelectCards = [];
     this.classSelectorButtons = [];
     this.classDetailButtons = [];
-    this.drawOutlinedText(ctx, "Afterimage War", this.width / 2, 38, 36, "#ffffff", "#111119", 8, "center");
+    this.drawClassSelectAtmosphere(ctx);
+    this.drawOutlinedText(ctx, "AFTERIMAGE WAR", this.width / 2, 38, 38, "#ffffff", "#111119", 8, "center");
+    this.drawOutlinedText(ctx, "Orb Arena Auto Battle", this.width / 2, 72, 15, "#dff6ff", "#111119", 4, "center");
     this.drawOutlinedText(
       ctx,
       this.selectedMode === "league" ? "Choose Your League Ball" : "Choose Fighters",
       this.width / 2,
-      74,
-      21,
-      "#5d6070",
+      96,
+      18,
       "#ffffff",
+      "#1a1728",
       5,
       "center"
     );
     this.drawModeButton(ctx, this.quickModeButton, this.selectedMode === "quick");
     this.drawModeButton(ctx, this.leagueModeButton, this.selectedMode === "league");
+    this.drawModeButton(ctx, this.chaosModeButton, this.selectedMode === "chaos");
 
     if (this.selectedMode === "league") {
       this.drawFocusedSelectionPanel(ctx, 0, "Player Ball", 38, 154, 500, 370);
       this.drawLeagueIntroPanel(ctx, 54, 548, 468, 116);
       this.drawOutlinedText(ctx, "Opponent generated automatically each round", this.width / 2, 704, 16, "#242431", "#ffffff", 4, "center");
       this.drawMenuButton(ctx, this.startLeagueButton, "#ffffff", "#111119", "#242431");
+    } else if (this.selectedMode === "chaos") {
+      this.drawChaosSetup(ctx);
     } else {
-      this.drawFocusedSelectionPanel(ctx, 0, "Fighter A", 28, 148, 520, 284);
-      this.drawFocusedSelectionPanel(ctx, 1, "Fighter B", 28, 452, 520, 284);
-      this.drawMenuButton(ctx, this.startBattleButton, "#ffffff", "#111119", "#242431");
+      this.drawFocusedSelectionPanel(ctx, 0, "Fighter A", 28, 160, 520, 270);
+      this.drawFocusedSelectionPanel(ctx, 1, "Fighter B", 28, 446, 520, 270);
+      this.drawMatchupStrip(ctx, 54, 738, 468, 48);
+      this.drawStartBattleButton(ctx);
     }
     if (this.devToolsVisible) {
       this.drawDevToolsPanel(ctx);
@@ -2415,15 +2751,261 @@ export class Game {
       ctx,
       this.selectedMode === "league"
         ? "A/D or Left/Right Player Ball   Enter Start Run"
-        : "A/D Fighter A   Left/Right Fighter B   Enter Start",
+        : this.selectedMode === "chaos"
+          ? "A/D select slot     \u2190/\u2192 class     Enter Start"
+        : "A/D Fighter A     \u2190/\u2192 Fighter B     Enter Start",
       this.width / 2,
-      928,
+      912,
       12,
-      "#242431",
-      "#ffffff",
-      4,
+      "#d7d9e6",
+      "#111119",
+      3,
       "center"
     );
+  }
+
+  private drawClassSelectAtmosphere(ctx: CanvasRenderingContext2D): void {
+    ctx.save();
+    const gradient = ctx.createLinearGradient(0, 0, 0, this.height);
+    gradient.addColorStop(0, "#221a37");
+    gradient.addColorStop(0.48, "#eeeaff");
+    gradient.addColorStop(1, "#d8d4e8");
+    ctx.fillStyle = gradient;
+    ctx.fillRect(0, 0, this.width, this.height);
+
+    const glow = ctx.createRadialGradient(this.width / 2, 360, 24, this.width / 2, 360, 410);
+    glow.addColorStop(0, "rgba(94, 231, 255, 0.34)");
+    glow.addColorStop(0.45, "rgba(194, 174, 255, 0.18)");
+    glow.addColorStop(1, "rgba(255, 255, 255, 0)");
+    ctx.fillStyle = glow;
+    ctx.fillRect(0, 0, this.width, this.height);
+
+    ctx.strokeStyle = "rgba(255,255,255,0.18)";
+    ctx.lineWidth = 1;
+    for (let x = -80; x < this.width + 80; x += 48) {
+      ctx.beginPath();
+      ctx.moveTo(x, 132);
+      ctx.lineTo(x + 130, 914);
+      ctx.stroke();
+    }
+    for (let y = 150; y < 920; y += 58) {
+      ctx.beginPath();
+      ctx.moveTo(34, y);
+      ctx.lineTo(this.width - 34, y + 10);
+      ctx.stroke();
+    }
+
+    for (let i = 0; i < 13; i += 1) {
+      const x = (i * 71 + this.time * 18) % (this.width + 180) - 90;
+      const y = 172 + ((i * 83 + this.time * 12) % 650);
+      ctx.strokeStyle = `rgba(223,246,255,${0.08 + (i % 3) * 0.035})`;
+      ctx.lineWidth = 2 + (i % 2);
+      ctx.beginPath();
+      ctx.moveTo(x, y);
+      ctx.lineTo(x + 72, y - 20);
+      ctx.stroke();
+    }
+
+    ctx.fillStyle = "rgba(255,255,255,0.42)";
+    for (let i = 0; i < 38; i += 1) {
+      const x = (i * 47 + this.time * 9) % this.width;
+      const y = 124 + ((i * 67 + this.time * 15) % 760);
+      ctx.beginPath();
+      ctx.arc(x, y, i % 4 === 0 ? 1.6 : 1, 0, TAU);
+      ctx.fill();
+    }
+    ctx.restore();
+  }
+
+  private drawChaosSetup(ctx: CanvasRenderingContext2D): void {
+    this.drawOutlinedText(ctx, "Chaos Arena", this.width / 2, 166, 25, "#ffffff", "#111119", 6, "center");
+    this.drawOutlinedText(ctx, "Free-for-all. Last orb standing wins.", this.width / 2, 190, 14, "#dff6ff", "#111119", 3, "center");
+
+    this.chaosCountButtons.forEach((button, index) => {
+      const count = index + 2;
+      const selected = this.chaosFighterCount === count;
+      this.drawChaosCountButton(ctx, button, selected);
+    });
+
+    const activeCount = clamp(this.chaosFighterCount, 2, 4);
+    for (let index = 0; index < activeCount; index += 1) {
+      const row = Math.floor(index / 2);
+      const col = index % 2;
+      const x = 42 + col * 254;
+      const y = 250 + row * 178;
+      this.drawChaosSelectorCard(ctx, index, x, y, 238, 164);
+    }
+
+    this.drawChaosRosterStrip(ctx, 60, 626, 456, 42);
+    this.drawStartBattleButton(ctx);
+  }
+
+  private drawChaosCountButton(ctx: CanvasRenderingContext2D, button: ButtonRect, selected: boolean): void {
+    ctx.save();
+    const gradient = ctx.createLinearGradient(button.x, button.y, button.x, button.y + button.h);
+    gradient.addColorStop(0, selected ? "#ecfbff" : "#ffffff");
+    gradient.addColorStop(1, selected ? "#bdeeff" : "#e9eaf2");
+    ctx.fillStyle = gradient;
+    ctx.strokeStyle = selected ? "#22b8ff" : "rgba(17,17,25,0.86)";
+    ctx.lineWidth = selected ? 4 : 3;
+    ctx.shadowColor = selected ? "rgba(34,184,255,0.26)" : "rgba(17,17,25,0.12)";
+    ctx.shadowBlur = selected ? 10 : 4;
+    ctx.shadowOffsetY = 2;
+    ctx.beginPath();
+    ctx.roundRect(button.x, button.y, button.w, button.h, 8);
+    ctx.fill();
+    ctx.shadowColor = "transparent";
+    ctx.stroke();
+    this.drawOutlinedText(ctx, button.label, button.x + button.w / 2, button.y + button.h / 2 + 1, 13, "#242431", "#ffffff", 3, "center");
+    ctx.restore();
+  }
+
+  private drawChaosSelectorCard(ctx: CanvasRenderingContext2D, fighterIndex: number, x: number, y: number, w: number, h: number): void {
+    const fighterClass = getFighterClass(this.chaosClassIds[fighterIndex]);
+    const selected = this.chaosSelectedSlot === fighterIndex;
+    const slotLabel = slotLabelForIndex(fighterIndex);
+    const currentIndex = Math.max(0, playableClasses.findIndex((candidate) => candidate.id === fighterClass.id));
+    ctx.save();
+    ctx.shadowColor = selected ? withAlpha(fighterClass.primaryColor, 0.28) : "rgba(17,17,25,0.18)";
+    ctx.shadowBlur = selected ? 14 : 8;
+    ctx.shadowOffsetY = 4;
+    ctx.fillStyle = "rgba(248,248,252,0.96)";
+    ctx.strokeStyle = selected ? fighterClass.primaryColor : "#111119";
+    ctx.lineWidth = selected ? 5 : 4;
+    ctx.beginPath();
+    ctx.roundRect(x, y, w, h, 8);
+    ctx.fill();
+    ctx.shadowColor = "transparent";
+    ctx.stroke();
+
+    const panelGradient = ctx.createLinearGradient(x + 8, y + 40, x + w - 8, y + h - 48);
+    panelGradient.addColorStop(0, withAlpha(fighterClass.primaryColor, 0.48));
+    panelGradient.addColorStop(0.52, "rgba(255,255,255,0.9)");
+    panelGradient.addColorStop(1, withAlpha(fighterClass.secondaryColor, 0.18));
+    ctx.fillStyle = panelGradient;
+    ctx.strokeStyle = "rgba(17,17,25,0.58)";
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.roundRect(x + 8, y + 38, w - 16, 78, 8);
+    ctx.fill();
+    ctx.stroke();
+
+    this.drawChaosSlotBadge(ctx, slotLabel, x + 12, y + 10, fighterClass);
+
+    const detailButton: ClassDetailButtonRect = {
+      x: x + w - 36,
+      y: y + 12,
+      w: 24,
+      h: 24,
+      label: "i",
+      fighterIndex
+    };
+    this.classDetailButtons.push(detailButton);
+    this.drawInfoButton(ctx, detailButton, fighterClass);
+
+    this.drawHeroBallPreview(ctx, x + 47, y + 79, 29, fighterClass);
+    ctx.font = "900 17px Arial, sans-serif";
+    this.drawOutlinedText(ctx, ellipsizeText(ctx, fighterClass.displayName, w - 106), x + 86, y + 59, 17, "#ffffff", "#111119", 5, "left");
+
+    ctx.save();
+    ctx.font = "900 10px Arial, sans-serif";
+    ctx.textAlign = "left";
+    ctx.textBaseline = "middle";
+    ctx.fillStyle = "#242431";
+    ctx.fillText(ellipsizeText(ctx, fighterClass.roleLabel ?? fighterClass.role, w - 106), x + 88, y + 80);
+    ctx.restore();
+
+    this.drawStatChip(ctx, `HP ${fighterClass.baseHP ?? DEFAULT_MAX_HP}`, x + 88, y + 91, 58, fighterClass.primaryColor);
+    this.drawStatChip(ctx, getShortSkillName(fighterClass), x + 150, y + 91, 74, fighterClass.secondaryColor);
+
+    const prevButton: ClassSelectorButtonRect = { x: x + 18, y: y + h - 38, w: 38, h: 30, label: "<", fighterIndex, direction: -1 };
+    const nextButton: ClassSelectorButtonRect = { x: x + w - 56, y: y + h - 38, w: 38, h: 30, label: ">", fighterIndex, direction: 1 };
+    this.classSelectorButtons.push(prevButton, nextButton);
+    this.drawChaosArrowButton(ctx, prevButton, fighterClass);
+    this.drawChaosArrowButton(ctx, nextButton, fighterClass);
+    this.drawClassIndexPill(ctx, `${currentIndex + 1} / ${playableClasses.length}`, x + w / 2, y + h - 23, fighterClass);
+    ctx.restore();
+  }
+
+  private drawChaosSlotBadge(
+    ctx: CanvasRenderingContext2D,
+    slotLabel: string,
+    x: number,
+    y: number,
+    fighterClass: FighterClass
+  ): void {
+    ctx.save();
+    const w = 104;
+    const h = 24;
+    const gradient = ctx.createLinearGradient(x, y, x + w, y);
+    gradient.addColorStop(0, "rgba(17,17,25,0.9)");
+    gradient.addColorStop(1, withAlpha(fighterClass.primaryColor, 0.62));
+    ctx.fillStyle = gradient;
+    ctx.strokeStyle = withAlpha(fighterClass.primaryColor, 0.85);
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.roundRect(x, y, w, h, 7);
+    ctx.fill();
+    ctx.stroke();
+    ctx.fillStyle = fighterClass.secondaryColor;
+    ctx.beginPath();
+    ctx.arc(x + 15, y + h / 2, 4.2, 0, TAU);
+    ctx.fill();
+    this.drawOutlinedText(ctx, `FIGHTER ${slotLabel}`, x + 29, y + h / 2 + 1, 12, "#ffffff", "#111119", 3, "left");
+    ctx.restore();
+  }
+
+  private drawChaosArrowButton(ctx: CanvasRenderingContext2D, button: ClassSelectorButtonRect, fighterClass: FighterClass): void {
+    ctx.save();
+    const gradient = ctx.createLinearGradient(button.x, button.y, button.x, button.y + button.h);
+    gradient.addColorStop(0, "#ffffff");
+    gradient.addColorStop(1, withAlpha(fighterClass.secondaryColor, 0.24));
+    ctx.fillStyle = gradient;
+    ctx.strokeStyle = withAlpha(fighterClass.primaryColor, 0.95);
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.roundRect(button.x, button.y, button.w, button.h, 8);
+    ctx.fill();
+    ctx.stroke();
+
+    const cx = button.x + button.w / 2;
+    const cy = button.y + button.h / 2;
+    ctx.fillStyle = "#242431";
+    ctx.beginPath();
+    if (button.direction < 0) {
+      ctx.moveTo(cx + 6, cy - 8);
+      ctx.lineTo(cx - 5, cy);
+      ctx.lineTo(cx + 6, cy + 8);
+    } else {
+      ctx.moveTo(cx - 6, cy - 8);
+      ctx.lineTo(cx + 5, cy);
+      ctx.lineTo(cx - 6, cy + 8);
+    }
+    ctx.closePath();
+    ctx.fill();
+    ctx.restore();
+  }
+
+  private drawChaosRosterStrip(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number): void {
+    ctx.save();
+    ctx.fillStyle = "rgba(17,17,25,0.78)";
+    ctx.strokeStyle = "#111119";
+    ctx.lineWidth = 4;
+    ctx.beginPath();
+    ctx.roundRect(x, y, w, h, 8);
+    ctx.fill();
+    ctx.stroke();
+    const activeCount = clamp(this.chaosFighterCount, 2, 4);
+    for (let index = 0; index < activeCount; index += 1) {
+      const fighterClass = getFighterClass(this.chaosClassIds[index]);
+      const segmentW = w / activeCount;
+      const segmentX = x + index * segmentW;
+      ctx.fillStyle = withAlpha(fighterClass.primaryColor, 0.28);
+      ctx.fillRect(segmentX + 4, y + 4, segmentW - 8, h - 8);
+      this.drawOutlinedText(ctx, slotLabelForIndex(index), segmentX + 17, y + h / 2, 13, fighterClass.secondaryColor, "#111119", 4, "center");
+      this.drawOutlinedText(ctx, ellipsizeText(ctx, shortClassName(fighterClass.displayName), segmentW - 40), segmentX + 32, y + h / 2, 12, "#ffffff", "#111119", 3, "left");
+    }
+    ctx.restore();
   }
 
   private drawFocusedSelectionPanel(
@@ -2436,65 +3018,391 @@ export class Game {
     h: number
   ): void {
     ctx.save();
-    ctx.fillStyle = "#f8f8fc";
+    ctx.shadowColor = "rgba(17,17,25,0.24)";
+    ctx.shadowBlur = 18;
+    ctx.shadowOffsetY = 8;
+    ctx.fillStyle = "rgba(248,248,252,0.96)";
     ctx.strokeStyle = "#111119";
-    ctx.lineWidth = 6;
+    ctx.lineWidth = 5;
     ctx.beginPath();
     ctx.roundRect(x, y, w, h, 8);
     ctx.fill();
+    ctx.shadowColor = "transparent";
     ctx.stroke();
 
-    this.drawOutlinedText(ctx, title, x + 22, y + 28, 22, "#ffffff", "#111119", 5, "left");
-
     const fighterClass = getFighterClass(this.selectedClassIds[fighterIndex]);
+    this.drawFighterHeaderBadge(ctx, title, x + 20, y + 14, fighterClass);
     const currentIndex = Math.max(0, playableClasses.findIndex((candidate) => candidate.id === fighterClass.id));
-    const accentY = y + 48;
-    ctx.fillStyle = fighterClass.primaryColor;
-    ctx.globalAlpha = 0.18;
+    const heroX = x + 16;
+    const heroY = y + 48;
+    const heroW = w - 32;
+    const heroH = h - 106;
+    const heroGradient = ctx.createLinearGradient(heroX, heroY, heroX + heroW, heroY + heroH);
+    heroGradient.addColorStop(0, withAlpha(fighterClass.primaryColor, 0.88));
+    heroGradient.addColorStop(0.52, withAlpha(fighterClass.secondaryColor, 0.34));
+    heroGradient.addColorStop(1, "rgba(255,255,255,0.84)");
+    ctx.fillStyle = heroGradient;
+    ctx.strokeStyle = "rgba(17,17,25,0.86)";
+    ctx.lineWidth = 3;
     ctx.beginPath();
-    ctx.roundRect(x + 14, accentY, w - 28, h - 122, 8);
+    ctx.roundRect(heroX, heroY, heroW, heroH, 8);
     ctx.fill();
-    ctx.globalAlpha = 1;
+    ctx.stroke();
 
-    const infoButtonSize = 32;
+    this.drawClassCardDecor(ctx, heroX, heroY, heroW, fighterClass);
+
+    const infoButtonSize = 30;
     const detailButton: ClassDetailButtonRect = {
-      x: x + w - 58,
-      y: accentY + 12,
+      x: heroX + heroW - 44,
+      y: heroY + 12,
       w: infoButtonSize,
       h: infoButtonSize,
       label: "i",
       fighterIndex
     };
 
-    this.drawBallPreview(ctx, x + 72, y + 126, h > 330 ? 54 : 44, fighterClass);
+    this.drawHeroBallPreview(ctx, heroX + 76, heroY + 80, h > 330 ? 54 : 49, fighterClass);
+    const textX = heroX + 148;
+    const textW = heroW - 206;
     ctx.font = "900 25px Arial, sans-serif";
-    const className = ellipsizeText(ctx, fighterClass.displayName, w - 214);
-    this.drawOutlinedText(ctx, className, x + 140, y + 78, 25, "#ffffff", "#111119", 6, "left");
+    const className = ellipsizeText(ctx, fighterClass.displayName, textW);
+    this.drawOutlinedText(ctx, className, textX, heroY + 31, 25, "#ffffff", "#111119", 6, "left");
 
-    ctx.fillStyle = "#252633";
-    ctx.font = "900 14px Arial, sans-serif";
-    ctx.textAlign = "left";
-    ctx.textBaseline = "top";
-    ctx.fillText(ellipsizeText(ctx, fighterClass.roleLabel ?? fighterClass.role.toUpperCase(), w - 214), x + 140, y + 104);
+    this.drawRoleBadge(ctx, fighterClass.roleLabel ?? fighterClass.role.toUpperCase(), textX, heroY + 48, Math.min(270, textW), fighterClass);
 
-    ctx.font = "900 15px Arial, sans-serif";
-    ctx.fillText(`HP ${fighterClass.baseHP ?? DEFAULT_MAX_HP}`, x + 140, y + 130);
-    ctx.fillText(`SPD ${fighterClass.targetMoveSpeed ?? fighterClass.baseMoveSpeed}`, x + 226, y + 130);
+    this.drawStatChip(ctx, `HP ${fighterClass.baseHP ?? DEFAULT_MAX_HP}`, textX, heroY + 77, 72, fighterClass.primaryColor);
+    this.drawStatChip(ctx, `SPD ${fighterClass.targetMoveSpeed ?? fighterClass.baseMoveSpeed}`, textX + 80, heroY + 77, 82, fighterClass.primaryColor);
+    this.drawStatChip(ctx, `SKILL ${fighterClass.abilityName.toUpperCase()}`, textX, heroY + 106, Math.min(270, textW), fighterClass.secondaryColor);
 
-    ctx.font = "900 14px Arial, sans-serif";
-    ctx.fillText(ellipsizeText(ctx, `Skill: ${fighterClass.abilityName}`, w - 184), x + 140, y + 156);
+    this.drawCardDescription(ctx, fighterClass.shortDescription ?? fighterClass.abilityDescription, textX, heroY + 132, textW, 2);
 
-    this.drawWrappedText(ctx, fighterClass.shortDescription ?? fighterClass.abilityDescription, x + 140, y + 181, w - 172, 15, 2);
-
-    const prevButton: ClassSelectorButtonRect = { x: x + 24, y: y + h - 58, w: 120, h: 38, label: "< PREV", fighterIndex, direction: -1 };
-    const nextButton: ClassSelectorButtonRect = { x: x + w - 144, y: y + h - 58, w: 120, h: 38, label: "NEXT >", fighterIndex, direction: 1 };
+    const prevButton: ClassSelectorButtonRect = { x: x + 24, y: y + h - 50, w: 126, h: 36, label: "< PREV", fighterIndex, direction: -1 };
+    const nextButton: ClassSelectorButtonRect = { x: x + w - 150, y: y + h - 50, w: 126, h: 36, label: "NEXT >", fighterIndex, direction: 1 };
     this.classSelectorButtons.push(prevButton, nextButton);
     this.classDetailButtons.push(detailButton);
-    this.drawMenuButton(ctx, prevButton, "#ffffff", fighterClass.primaryColor, "#242431");
+    this.drawClassNavButton(ctx, prevButton, fighterClass);
     this.drawInfoButton(ctx, detailButton, fighterClass);
-    this.drawMenuButton(ctx, nextButton, "#ffffff", fighterClass.primaryColor, "#242431");
+    this.drawClassNavButton(ctx, nextButton, fighterClass);
 
-    this.drawOutlinedText(ctx, `${currentIndex + 1} / ${playableClasses.length}`, x + w / 2, y + h - 38, 14, "#242431", "#ffffff", 3, "center");
+    this.drawClassIndexPill(ctx, `${currentIndex + 1} / ${playableClasses.length}`, x + w / 2, y + h - 32, fighterClass);
+    ctx.restore();
+  }
+
+  private drawFighterHeaderBadge(
+    ctx: CanvasRenderingContext2D,
+    title: string,
+    x: number,
+    y: number,
+    fighterClass: FighterClass
+  ): void {
+    ctx.save();
+    const w = 150;
+    const h = 30;
+    const gradient = ctx.createLinearGradient(x, y, x + w, y + h);
+    gradient.addColorStop(0, "rgba(17,17,25,0.92)");
+    gradient.addColorStop(0.6, "rgba(37,38,51,0.88)");
+    gradient.addColorStop(1, withAlpha(fighterClass.primaryColor, 0.64));
+    ctx.shadowColor = withAlpha(fighterClass.primaryColor, 0.28);
+    ctx.shadowBlur = 10;
+    ctx.fillStyle = gradient;
+    ctx.strokeStyle = withAlpha(fighterClass.secondaryColor, 0.9);
+    ctx.lineWidth = 2.5;
+    ctx.beginPath();
+    ctx.roundRect(x, y, w, h, 8);
+    ctx.fill();
+    ctx.shadowColor = "transparent";
+    ctx.stroke();
+
+    ctx.fillStyle = fighterClass.secondaryColor;
+    ctx.beginPath();
+    ctx.arc(x + 17, y + h / 2, 4.5, 0, TAU);
+    ctx.fill();
+
+    this.drawOutlinedText(ctx, title.toUpperCase(), x + 32, y + h / 2 + 1, 16, "#ffffff", "#111119", 3, "left");
+    ctx.restore();
+  }
+
+  private drawClassNavButton(ctx: CanvasRenderingContext2D, button: ClassSelectorButtonRect, fighterClass: FighterClass): void {
+    ctx.save();
+    const gradient = ctx.createLinearGradient(button.x, button.y, button.x, button.y + button.h);
+    gradient.addColorStop(0, "#ffffff");
+    gradient.addColorStop(0.5, "#f2f7fb");
+    gradient.addColorStop(1, withAlpha(fighterClass.secondaryColor, 0.22));
+    ctx.shadowColor = withAlpha(fighterClass.primaryColor, 0.18);
+    ctx.shadowBlur = 8;
+    ctx.shadowOffsetY = 2;
+    ctx.fillStyle = gradient;
+    ctx.strokeStyle = withAlpha(fighterClass.primaryColor, 0.95);
+    ctx.lineWidth = 4;
+    ctx.beginPath();
+    ctx.roundRect(button.x, button.y, button.w, button.h, 8);
+    ctx.fill();
+    ctx.shadowColor = "transparent";
+    ctx.stroke();
+
+    ctx.strokeStyle = "rgba(255,255,255,0.72)";
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.roundRect(button.x + 6, button.y + 5, button.w - 12, button.h - 10, 6);
+    ctx.stroke();
+
+    const chevronX = button.direction < 0 ? button.x + 20 : button.x + button.w - 20;
+    const cy = button.y + button.h / 2;
+    ctx.fillStyle = fighterClass.primaryColor;
+    ctx.beginPath();
+    if (button.direction < 0) {
+      ctx.moveTo(chevronX + 6, cy - 8);
+      ctx.lineTo(chevronX - 4, cy);
+      ctx.lineTo(chevronX + 6, cy + 8);
+    } else {
+      ctx.moveTo(chevronX - 6, cy - 8);
+      ctx.lineTo(chevronX + 4, cy);
+      ctx.lineTo(chevronX - 6, cy + 8);
+    }
+    ctx.closePath();
+    ctx.fill();
+
+    const label = button.direction < 0 ? "PREV" : "NEXT";
+    this.drawOutlinedText(ctx, label, button.x + button.w / 2, cy + 1, 19, "#242431", "#ffffff", 3, "center");
+    ctx.restore();
+  }
+
+  private drawClassIndexPill(ctx: CanvasRenderingContext2D, text: string, centerX: number, centerY: number, fighterClass: FighterClass): void {
+    ctx.save();
+    const w = 78;
+    const h = 26;
+    const x = centerX - w / 2;
+    const y = centerY - h / 2;
+    ctx.fillStyle = "rgba(17,17,25,0.72)";
+    ctx.strokeStyle = withAlpha(fighterClass.secondaryColor, 0.8);
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.roundRect(x, y, w, h, 8);
+    ctx.fill();
+    ctx.stroke();
+    this.drawOutlinedText(ctx, text, centerX, centerY + 1, 12, "#ffffff", "#111119", 3, "center");
+    ctx.restore();
+  }
+
+  private drawClassCardDecor(
+    ctx: CanvasRenderingContext2D,
+    x: number,
+    y: number,
+    w: number,
+    fighterClass: FighterClass
+  ): void {
+    ctx.save();
+    ctx.globalAlpha = 0.46;
+    ctx.strokeStyle = "#ffffff";
+    ctx.lineWidth = 2;
+    for (let i = 0; i < 4; i += 1) {
+      const yy = y + 24 + i * 28;
+      ctx.beginPath();
+      ctx.moveTo(x + w - 132 + i * 6, yy);
+      ctx.lineTo(x + w - 48 + i * 4, yy - 18);
+      ctx.stroke();
+    }
+    ctx.globalAlpha = 0.22;
+    ctx.strokeStyle = fighterClass.secondaryColor;
+    ctx.lineWidth = 4;
+    ctx.beginPath();
+    ctx.arc(x + 76, y + 83, 70, -0.7, 2.35);
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  private drawHeroBallPreview(ctx: CanvasRenderingContext2D, x: number, y: number, radius: number, fighterClass: FighterClass): void {
+    ctx.save();
+    const pulse = 1 + Math.sin(this.time * 3.2) * 0.025;
+    const glow = ctx.createRadialGradient(x, y, 4, x, y, radius * 2.05);
+    glow.addColorStop(0, withAlpha(fighterClass.secondaryColor, 0.45));
+    glow.addColorStop(1, "rgba(255,255,255,0)");
+    ctx.fillStyle = glow;
+    ctx.beginPath();
+    ctx.arc(x, y, radius * 2.05, 0, TAU);
+    ctx.fill();
+    this.drawBallPreview(ctx, x, y, radius * pulse, fighterClass);
+    ctx.strokeStyle = withAlpha(fighterClass.secondaryColor, 0.72);
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.arc(x, y, radius + 10 + Math.sin(this.time * 2.5) * 2, 0.15, Math.PI * 1.38);
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  private drawRoleBadge(ctx: CanvasRenderingContext2D, text: string, x: number, y: number, w: number, fighterClass: FighterClass): void {
+    ctx.save();
+    ctx.font = "900 11px Arial, sans-serif";
+    const badgeText = ellipsizeText(ctx, text, w - 22);
+    ctx.fillStyle = "rgba(255,255,255,0.82)";
+    ctx.strokeStyle = withAlpha(fighterClass.outlineColor, 0.8);
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.roundRect(x, y, w, 22, 8);
+    ctx.fill();
+    ctx.stroke();
+    ctx.fillStyle = "#242431";
+    ctx.textAlign = "left";
+    ctx.textBaseline = "middle";
+    ctx.fillText(badgeText, x + 11, y + 11);
+    ctx.restore();
+  }
+
+  private drawStatChip(ctx: CanvasRenderingContext2D, text: string, x: number, y: number, w: number, accentColor: string): void {
+    ctx.save();
+    ctx.fillStyle = "rgba(17,17,25,0.74)";
+    ctx.strokeStyle = withAlpha(accentColor, 0.78);
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.roundRect(x, y, w, 22, 7);
+    ctx.fill();
+    ctx.stroke();
+    ctx.fillStyle = "#ffffff";
+    ctx.font = "900 10px Arial, sans-serif";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText(ellipsizeText(ctx, text, w - 12), x + w / 2, y + 11);
+    ctx.restore();
+  }
+
+  private drawCardDescription(ctx: CanvasRenderingContext2D, text: string, x: number, y: number, w: number, maxLines: number): void {
+    ctx.save();
+    ctx.fillStyle = "#242431";
+    ctx.font = "800 12px Arial, sans-serif";
+    ctx.textAlign = "left";
+    ctx.textBaseline = "top";
+    const words = text.split(" ");
+    let line = "";
+    let lineIndex = 0;
+    const lineHeight = 15;
+    for (const word of words) {
+      const testLine = line ? `${line} ${word}` : word;
+      if (ctx.measureText(testLine).width > w && line) {
+        if (lineIndex === maxLines - 1) {
+          ctx.fillText(ellipsizeText(ctx, `${line}...`, w), x, y + lineIndex * lineHeight);
+          ctx.restore();
+          return;
+        }
+        ctx.fillText(line, x, y + lineIndex * lineHeight);
+        line = word;
+        lineIndex += 1;
+      } else {
+        line = testLine;
+      }
+    }
+    if (line && lineIndex < maxLines) {
+      ctx.fillText(line, x, y + lineIndex * lineHeight);
+    }
+    ctx.restore();
+  }
+
+  private drawMatchupStrip(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number): void {
+    const leftClass = getFighterClass(this.selectedClassIds[0]);
+    const rightClass = getFighterClass(this.selectedClassIds[1]);
+    ctx.save();
+    ctx.shadowColor = "rgba(17,17,25,0.2)";
+    ctx.shadowBlur = 9;
+    ctx.shadowOffsetY = 3;
+    ctx.fillStyle = "#111119";
+    ctx.beginPath();
+    ctx.roundRect(x, y, w, h, 8);
+    ctx.fill();
+    ctx.shadowColor = "transparent";
+
+    ctx.save();
+    ctx.beginPath();
+    ctx.roundRect(x + 3, y + 3, w - 6, h - 6, 6);
+    ctx.clip();
+    const leftGradient = ctx.createLinearGradient(x, y, x + w * 0.58, y);
+    leftGradient.addColorStop(0, withAlpha(leftClass.primaryColor, 0.32));
+    leftGradient.addColorStop(0.64, withAlpha(leftClass.secondaryColor, 0.2));
+    leftGradient.addColorStop(1, withAlpha(leftClass.primaryColor, 0.36));
+    ctx.fillStyle = leftGradient;
+    ctx.fillRect(x + 3, y + 3, w / 2 + 26, h - 6);
+
+    const rightGradient = ctx.createLinearGradient(x + w * 0.42, y, x + w, y);
+    rightGradient.addColorStop(0, withAlpha(rightClass.primaryColor, 0.36));
+    rightGradient.addColorStop(0.38, withAlpha(rightClass.secondaryColor, 0.2));
+    rightGradient.addColorStop(1, withAlpha(rightClass.primaryColor, 0.32));
+    ctx.fillStyle = rightGradient;
+    ctx.fillRect(x + w / 2 - 26, y + 3, w / 2 + 23, h - 6);
+
+    const seamGradient = ctx.createLinearGradient(x + w / 2 - 34, y, x + w / 2 + 34, y);
+    seamGradient.addColorStop(0, withAlpha(leftClass.secondaryColor, 0.22));
+    seamGradient.addColorStop(0.5, "rgba(17,17,25,0.58)");
+    seamGradient.addColorStop(1, withAlpha(rightClass.secondaryColor, 0.22));
+    ctx.fillStyle = seamGradient;
+    ctx.beginPath();
+    ctx.moveTo(x + w / 2 - 34, y + 3);
+    ctx.lineTo(x + w / 2 + 22, y + 3);
+    ctx.lineTo(x + w / 2 + 34, y + h - 3);
+    ctx.lineTo(x + w / 2 - 22, y + h - 3);
+    ctx.closePath();
+    ctx.fill();
+    ctx.restore();
+
+    ctx.strokeStyle = "#111119";
+    ctx.lineWidth = 4;
+    ctx.beginPath();
+    ctx.roundRect(x, y, w, h, 8);
+    ctx.stroke();
+
+    ctx.fillStyle = "rgba(255,255,255,0.72)";
+    ctx.beginPath();
+    ctx.roundRect(x + 8, y + 8, w - 16, h - 16, 6);
+    ctx.fill();
+
+    ctx.save();
+    ctx.globalCompositeOperation = "source-atop";
+    ctx.fillStyle = withAlpha(leftClass.primaryColor, 0.18);
+    ctx.fillRect(x + 8, y + 8, w / 2 - 8, h - 16);
+    ctx.fillStyle = withAlpha(rightClass.primaryColor, 0.18);
+    ctx.fillRect(x + w / 2, y + 8, w / 2 - 8, h - 16);
+    ctx.restore();
+
+    const cx = x + w / 2;
+    const cy = y + h / 2;
+    ctx.shadowColor = `rgba(255,255,255,${0.18 + Math.sin(this.time * 4) * 0.04})`;
+    ctx.shadowBlur = 10;
+    const badgeGradient = ctx.createLinearGradient(cx - 26, cy - 24, cx + 26, cy + 24);
+    badgeGradient.addColorStop(0, "#343142");
+    badgeGradient.addColorStop(0.5, "#111119");
+    badgeGradient.addColorStop(1, "#4c455f");
+    ctx.fillStyle = badgeGradient;
+    ctx.strokeStyle = "#ffffff";
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.arc(cx, cy, 26, 0, TAU);
+    ctx.fill();
+    ctx.stroke();
+    ctx.shadowColor = "transparent";
+
+    this.drawOutlinedText(ctx, ellipsizeText(ctx, leftClass.displayName, 168), cx - 42, cy, 16, leftClass.secondaryColor, "#111119", 4, "right");
+    this.drawOutlinedText(ctx, "VS", cx, cy + 1, 18, "#ffffff", "#111119", 5, "center");
+    this.drawOutlinedText(ctx, ellipsizeText(ctx, rightClass.displayName, 168), cx + 42, cy, 16, rightClass.secondaryColor, "#111119", 4, "left");
+    ctx.restore();
+  }
+
+  private drawStartBattleButton(ctx: CanvasRenderingContext2D): void {
+    const button = this.startBattleButton;
+    const pulse = 0.5 + Math.sin(this.time * 4) * 0.5;
+    ctx.save();
+    ctx.shadowColor = `rgba(34,184,255,${0.28 + pulse * 0.12})`;
+    ctx.shadowBlur = 18 + pulse * 8;
+    const gradient = ctx.createLinearGradient(button.x, button.y, button.x + button.w, button.y + button.h);
+    gradient.addColorStop(0, "#ffffff");
+    gradient.addColorStop(0.5, "#dff6ff");
+    gradient.addColorStop(1, "#ffd166");
+    ctx.fillStyle = gradient;
+    ctx.strokeStyle = "#111119";
+    ctx.lineWidth = 6;
+    ctx.beginPath();
+    ctx.roundRect(button.x, button.y, button.w, button.h, 8);
+    ctx.fill();
+    ctx.shadowColor = "transparent";
+    ctx.stroke();
+    this.drawOutlinedText(ctx, "START BATTLE", button.x + button.w / 2, button.y + 25, 25, "#242431", "#ffffff", 4, "center");
+    this.drawOutlinedText(ctx, "Begin Orb Clash", button.x + button.w / 2, button.y + 48, 12, "#5d6070", "#ffffff", 3, "center");
     ctx.restore();
   }
 
@@ -2765,6 +3673,11 @@ export class Game {
       berserker: "Trade carefully early, then let missing HP fuel faster Rage Breaks and heavier contact hits.",
       drill: "Use wall bounces and contact hits to stack Armor Break, then pierce defensive windows with Piercing Drill.",
       ninja: "Use wall bounces to prime Shadow Ready, then let Shadow Step chain short straight-line strike windows.",
+      fang: "Keep contact pressure high to maintain Bleed, then use Blood Scent and Rending Hunt to tear through wounded targets.",
+      spear: "Hold the mid-range lane with narrow thrusts. Spear Rush rewards clean line alignment without relying on projectiles.",
+      sniper: "Charge deliberate long-range shots, punish predictable bounce paths, and use Deadeye Beam to finish vulnerable targets.",
+      vector: "Turn wall bounces into linked laser lanes. Keep bouncing to build nodes, then let enemies cross the geometry.",
+      portal: "Link two wall portals, then use teleport exits to create surprise contact angles without changing enemy movement.",
       glass: "Protect your single HP with Glass Charges. Keep bouncing to refill charges before pressure catches you."
     };
     return playstyles[fighterClass.id] ?? "Lean into this class's core mechanic and choose upgrades that reinforce its role.";
@@ -2772,6 +3685,10 @@ export class Game {
 
   private drawTopUI(ctx: CanvasRenderingContext2D): void {
     this.drawOutlinedText(ctx, "Afterimage War", this.width / 2, 29, 28, "#ffffff", "#111119", 6, "center");
+    if (this.selectedMode === "chaos") {
+      this.drawOutlinedText(ctx, "Chaos Arena", this.width / 2, 55, 15, "#f8f8fc", "#111119", 4, "center");
+      return;
+    }
     if (this.selectedMode === "league" && this.leagueRun) {
       ctx.save();
       ctx.font = "900 13px Arial, sans-serif";
@@ -2796,7 +3713,8 @@ export class Game {
   private drawNamePlate(ctx: CanvasRenderingContext2D, fighter: Fighter, x: number, y: number, align: CanvasTextAlign): void {
     const plateW = 230;
     const startX = align === "left" ? x : x - plateW;
-    const label = fighter.id === "left" ? "FIGHTER A" : "FIGHTER B";
+    const fighterIndex = this.fighters.indexOf(fighter);
+    const label = fighterLabelFor(fighter, fighterIndex >= 0 ? fighterIndex : 0).toUpperCase();
     ctx.save();
     ctx.fillStyle = fighter.classDef.primaryColor;
     ctx.strokeStyle = "#111119";
@@ -2830,6 +3748,11 @@ export class Game {
   }
 
   private drawBottomUI(ctx: CanvasRenderingContext2D): void {
+    if (this.selectedMode === "chaos") {
+      this.drawChaosBattleUI(ctx);
+      return;
+    }
+
     ctx.save();
     ctx.fillStyle = "#f7f7fb";
     ctx.strokeStyle = "#111119";
@@ -2852,6 +3775,88 @@ export class Game {
       4,
       "center"
     );
+    ctx.restore();
+  }
+
+  private drawChaosBattleUI(ctx: CanvasRenderingContext2D): void {
+    ctx.save();
+    ctx.fillStyle = "#f7f7fb";
+    ctx.strokeStyle = "#111119";
+    ctx.lineWidth = 6;
+    ctx.beginPath();
+    ctx.roundRect(28, 806, 520, 150, 8);
+    ctx.fill();
+    ctx.stroke();
+
+    const cardW = 242;
+    const cardH = 50;
+    this.fighters.forEach((fighter, index) => {
+      const x = index % 2 === 0 ? 46 : 288;
+      const y = 826 + Math.floor(index / 2) * 58;
+      this.drawChaosAbilityPanel(ctx, fighter, index, x, y, cardW, cardH);
+    });
+
+    this.drawOutlinedText(
+      ctx,
+      "Last ball standing  |  Space Pause  R Restart  Esc Select",
+      288,
+      942,
+      12,
+      "#242431",
+      "#ffffff",
+      4,
+      "center"
+    );
+    ctx.restore();
+  }
+
+  private drawChaosAbilityPanel(
+    ctx: CanvasRenderingContext2D,
+    fighter: Fighter,
+    index: number,
+    x: number,
+    y: number,
+    w: number,
+    h: number
+  ): void {
+    const defeated = fighter.defeated || fighter.hp <= 0;
+    ctx.save();
+    ctx.fillStyle = defeated ? "#d9d9e3" : "#ffffff";
+    ctx.strokeStyle = defeated ? "#5d6070" : fighter.classDef.primaryColor;
+    ctx.lineWidth = 4;
+    ctx.beginPath();
+    ctx.roundRect(x, y, w, h, 8);
+    ctx.fill();
+    ctx.stroke();
+
+    ctx.fillStyle = fighter.classDef.primaryColor;
+    ctx.globalAlpha = defeated ? 0.16 : 0.24;
+    ctx.beginPath();
+    ctx.roundRect(x + 4, y + 4, 38, h - 8, 6);
+    ctx.fill();
+    ctx.globalAlpha = 1;
+
+    this.drawOutlinedText(ctx, slotLabelForIndex(index), x + 23, y + 31, 22, "#ffffff", "#111119", 5, "center");
+    const name = defeated ? `${fighter.classDef.displayName} KO` : fighter.classDef.displayName;
+    this.drawOutlinedText(ctx, ellipsizeText(ctx, name, w - 66), x + 52, y + 17, 14, "#242431", "#ffffff", 4, "left");
+
+    const hpLine = `HP ${Math.ceil(Math.max(0, fighter.hp))}/${fighter.maxHP}`;
+    ctx.font = "800 11px Arial, sans-serif";
+    this.drawOutlinedText(ctx, hpLine, x + 52, y + 35, 11, "#5d6070", "#ffffff", 3, "left");
+
+    const barX = x + w - 76;
+    const barY = y + 22;
+    ctx.fillStyle = "#dddde8";
+    ctx.strokeStyle = "#111119";
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.roundRect(barX, barY, 58, 12, 4);
+    ctx.fill();
+    ctx.stroke();
+    ctx.fillStyle = defeated ? "#8b8d9c" : fighter.classDef.secondaryColor;
+    ctx.beginPath();
+    ctx.roundRect(barX + 2, barY + 2, Math.max(0, 54 * fighter.ability.value), 8, 3);
+    ctx.fill();
     ctx.restore();
   }
 
@@ -2953,6 +3958,11 @@ export class Game {
     }
 
     const summary = this.lastMatchSummary;
+    if (this.selectedMode === "chaos") {
+      this.drawChaosWinner(ctx, summary);
+      return;
+    }
+
     ctx.save();
     ctx.fillStyle = "rgba(17,17,25,0.58)";
     ctx.fillRect(0, 0, this.width, this.height);
@@ -2990,6 +4000,78 @@ export class Game {
 
     this.drawResultColumn(ctx, summary.fighters[0], 46, 232, 232);
     this.drawResultColumn(ctx, summary.fighters[1], 298, 232, 232);
+    ctx.restore();
+
+    this.drawMenuButton(ctx, this.restartSameButton, "#ffffff", "#111119", "#242431");
+    this.drawMenuButton(ctx, this.classSelectButton, "#ffffff", "#111119", "#242431");
+    if (this.devToolsVisible) {
+      this.drawMenuButton(ctx, this.resultBalanceButton, "#eeeeF6", "#5d6070", "#242431");
+    }
+  }
+
+  private drawChaosWinner(ctx: CanvasRenderingContext2D, summary: MatchSummary): void {
+    ctx.save();
+    ctx.fillStyle = "rgba(17,17,25,0.58)";
+    ctx.fillRect(0, 0, this.width, this.height);
+    ctx.fillStyle = "#f8f8fc";
+    ctx.strokeStyle = "#111119";
+    ctx.lineWidth = 7;
+    ctx.beginPath();
+    ctx.roundRect(28, 102, 520, 770, 8);
+    ctx.fill();
+    ctx.stroke();
+
+    this.drawOutlinedText(ctx, "Chaos Arena", this.width / 2, 140, 24, "#ffffff", "#111119", 6, "center");
+    this.drawOutlinedText(
+      ctx,
+      `${summary.winnerName} Wins!`,
+      this.width / 2,
+      178,
+      31,
+      this.winner?.classDef.secondaryColor ?? "#ffffff",
+      "#111119",
+      8,
+      "center"
+    );
+    this.drawOutlinedText(ctx, `Duration ${summary.duration.toFixed(1)}s`, this.width / 2, 210, 17, "#242431", "#ffffff", 4, "center");
+
+    const tableX = 48;
+    const tableY = 246;
+    const tableW = 480;
+    const rowH = 94;
+    summary.fighters.forEach((result, index) => {
+      const y = tableY + index * rowH;
+      const accent = this.fighters[index]?.classDef.primaryColor ?? "#8b8d9c";
+      ctx.fillStyle = index % 2 === 0 ? "#ffffff" : "#f0f0f7";
+      ctx.strokeStyle = "#111119";
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.roundRect(tableX, y, tableW, rowH - 8, 8);
+      ctx.fill();
+      ctx.stroke();
+
+      ctx.fillStyle = accent;
+      ctx.globalAlpha = 0.24;
+      ctx.beginPath();
+      ctx.roundRect(tableX + 6, y + 6, 54, rowH - 20, 6);
+      ctx.fill();
+      ctx.globalAlpha = 1;
+
+      const place = result.placement ?? index + 1;
+      this.drawOutlinedText(ctx, ordinal(place), tableX + 33, y + 35, 18, "#ffffff", "#111119", 5, "center");
+      this.drawOutlinedText(ctx, ellipsizeText(ctx, result.className, 210), tableX + 74, y + 24, 18, "#242431", "#ffffff", 4, "left");
+      this.drawOutlinedText(ctx, result.label, tableX + 74, y + 48, 12, "#5d6070", "#ffffff", 3, "left");
+
+      ctx.font = "900 12px Arial, sans-serif";
+      ctx.fillStyle = "#242431";
+      ctx.textAlign = "right";
+      ctx.textBaseline = "middle";
+      ctx.fillText(`HP ${Math.ceil(Math.max(0, result.finalHp))}`, tableX + tableW - 18, y + 22);
+      ctx.fillText(`DMG ${result.stats.damageDealt.toFixed(0)} / TAKEN ${result.stats.damageTaken.toFixed(0)}`, tableX + tableW - 18, y + 44);
+      ctx.fillText(`KOs ${result.kos ?? result.stats.kos}  |  Skill ${result.stats.abilityUses.toFixed(0)}`, tableX + tableW - 18, y + 66);
+    });
+
+    this.drawOutlinedText(ctx, "Restart to run the same four-way clash.", this.width / 2, 808, 14, "#5d6070", "#ffffff", 3, "center");
     ctx.restore();
 
     this.drawMenuButton(ctx, this.restartSameButton, "#ffffff", "#111119", "#242431");
@@ -3202,6 +4284,11 @@ export class Game {
       berserker: ["impact-guard", "burst-guard", "emergency-guard", "momentum-barrier", "reinforced-shell"],
       drill: ["reinforced-shell", "momentum-barrier", "projectile-plating", "quick-core", "impact-guard"],
       ninja: ["impact-guard", "projectile-plating", "burst-guard", "momentum-barrier", "hard-thorns"],
+      fang: ["impact-guard", "status-filter", "projectile-plating", "momentum-barrier", "cleanse-pulse"],
+      spear: ["quick-core", "projectile-plating", "burst-guard", "impact-guard", "momentum-barrier"],
+      sniper: ["quick-core", "projectile-plating", "burst-guard", "sharp-impact", "momentum-barrier"],
+      vector: ["quick-core", "projectile-plating", "burst-guard", "momentum-barrier", "steady-core"],
+      portal: ["impact-guard", "projectile-plating", "burst-guard", "quick-core", "momentum-barrier"],
       glass: ["stable-shot", "focused-projectiles", "fast-charge", "skill-tempo", "clear-edge"]
     };
     return (recommended[opponentClassId] ?? Array.from(commonDefense)).includes(upgrade.id) || commonDefense.has(upgrade.id);
@@ -3228,6 +4315,11 @@ export class Game {
       berserker: "Low HP rage contact pressure.",
       drill: "Armor Break and defense piercing.",
       ninja: "Short multi-dashes and projectile evasion.",
+      fang: "Bleed contact and hunter pressure.",
+      spear: "Narrow mid-range thrusts and Spear Rush lines.",
+      sniper: "Charged long-range shots and Deadeye Beam.",
+      vector: "Wall-linked laser traps from arena bounces.",
+      portal: "Linked wall portals into surprise contact angles.",
       glass: "One HP, Glass Charges, and Prism Shift."
     };
     return threats[classId] ?? "Flexible pressure.";
@@ -4292,7 +5384,7 @@ export class Game {
       [`${selected.rowClassName} wins`, `${selected.rowWins}/${selected.matches}`],
       ["Win rate", `${Math.round(rowRate * 100)}%`],
       ["Proj / Contact", `${selected.averageStats[0].projectileDamage.toFixed(1)} / ${selected.averageStats[0].contactDamage.toFixed(1)}`],
-      ["Ability / DoT", `${selected.averageStats[0].abilityDamage.toFixed(1)} / ${(selected.averageStats[0].burnDamage + selected.averageStats[0].poisonDamage).toFixed(1)}`],
+      ["Ability / DoT", `${selected.averageStats[0].abilityDamage.toFixed(1)} / ${(selected.averageStats[0].burnDamage + selected.averageStats[0].poisonDamage + selected.averageStats[0].bleedDamage).toFixed(1)}`],
       this.formatSpecialTournamentDetail(selected.averageStats[0]),
       ["Hits / Abilities", `${selected.averageStats[0].projectileHits.toFixed(1)} / ${selected.averageStats[0].abilityUses.toFixed(1)}`]
     ];
@@ -4300,7 +5392,7 @@ export class Game {
       [`${selected.columnClassName} wins`, `${selected.columnWins}/${selected.matches}`],
       ["Avg duration", `${selected.averageDuration.toFixed(1)}s`],
       ["Proj / Contact", `${selected.averageStats[1].projectileDamage.toFixed(1)} / ${selected.averageStats[1].contactDamage.toFixed(1)}`],
-      ["Ability / DoT", `${selected.averageStats[1].abilityDamage.toFixed(1)} / ${(selected.averageStats[1].burnDamage + selected.averageStats[1].poisonDamage).toFixed(1)}`],
+      ["Ability / DoT", `${selected.averageStats[1].abilityDamage.toFixed(1)} / ${(selected.averageStats[1].burnDamage + selected.averageStats[1].poisonDamage + selected.averageStats[1].bleedDamage).toFixed(1)}`],
       this.formatSpecialTournamentDetail(selected.averageStats[1]),
       ["Hits / Abilities", `${selected.averageStats[1].projectileHits.toFixed(1)} / ${selected.averageStats[1].abilityUses.toFixed(1)}`]
     ];
@@ -4339,6 +5431,39 @@ export class Game {
       return [
         "Drill H/B/P",
         `${stats.drillContactHits.toFixed(1)} / ${stats.armorBreakStacksApplied.toFixed(1)} / ${stats.defensePiercedDamage.toFixed(1)}`
+      ];
+    }
+    if (stats.fangContactHits > 0 || stats.bleedDamage > 0 || stats.rendingHuntUses > 0) {
+      return [
+        "Fang H/B/R",
+        `${stats.fangContactHits.toFixed(1)} / ${stats.bleedDamage.toFixed(1)} / ${stats.rendingHuntUses.toFixed(1)}`
+      ];
+    }
+    if (stats.spearThrustUses > 0 || stats.spearRushUses > 0) {
+      const hitRate = stats.spearThrustHits / Math.max(1, stats.spearThrustUses);
+      return [
+        "Spear HR/S/R",
+        `${Math.round(hitRate * 100)}% / ${stats.sweetSpotHits.toFixed(1)} / ${stats.spearRushUses.toFixed(1)}`
+      ];
+    }
+    if (stats.chargedShotsFired > 0 || stats.deadeyeBeamUses > 0) {
+      const shotHitRate = stats.chargedShotsHit / Math.max(1, stats.chargedShotsFired);
+      const beamHitRate = stats.deadeyeBeamHits / Math.max(1, stats.deadeyeBeamUses);
+      return [
+        "Snipe S/B/P",
+        `${Math.round(shotHitRate * 100)}% / ${Math.round(beamHitRate * 100)}% / ${stats.closeRangePressureTime.toFixed(1)}s`
+      ];
+    }
+    if (stats.vectorLinesCreated > 0 || stats.vectorWebUses > 0) {
+      return [
+        "Vector L/H/W",
+        `${stats.vectorLinesCreated.toFixed(1)} / ${stats.vectorLineHits.toFixed(1)} / ${stats.vectorWebUses.toFixed(1)}`
+      ];
+    }
+    if (stats.portalsCreated > 0 || stats.portalTeleports > 0 || stats.riftGateUses > 0) {
+      return [
+        "Portal T/P/S",
+        `${stats.portalTeleports.toFixed(1)} / ${stats.exitPulseHits.toFixed(1)} / ${stats.riftShotHits.toFixed(1)}`
       ];
     }
     if (stats.spikeContactHits > 0 || stats.thornDamageDealt > 0 || stats.wallSpikeChargesGained > 0) {
@@ -4736,6 +5861,16 @@ export class Game {
       } else if (this.selectedMode === "league" && (event.code === "KeyD" || event.code === "ArrowRight")) {
         event.preventDefault();
         this.cycleSelectedClass(0, 1);
+      } else if (this.selectedMode === "chaos" && event.code === "KeyA") {
+        this.chaosSelectedSlot = (this.chaosSelectedSlot - 1 + this.chaosFighterCount) % this.chaosFighterCount;
+      } else if (this.selectedMode === "chaos" && event.code === "KeyD") {
+        this.chaosSelectedSlot = (this.chaosSelectedSlot + 1) % this.chaosFighterCount;
+      } else if (this.selectedMode === "chaos" && event.code === "ArrowLeft") {
+        event.preventDefault();
+        this.cycleSelectedClass(this.chaosSelectedSlot, -1);
+      } else if (this.selectedMode === "chaos" && event.code === "ArrowRight") {
+        event.preventDefault();
+        this.cycleSelectedClass(this.chaosSelectedSlot, 1);
       } else if (event.code === "KeyA") {
         this.cycleSelectedClass(0, -1);
       } else if (event.code === "KeyD") {
@@ -4749,6 +5884,8 @@ export class Game {
       } else if (event.code === "Enter") {
         if (this.selectedMode === "league") {
           this.startLeagueRun();
+        } else if (this.selectedMode === "chaos") {
+          this.startChaosArena();
         } else {
           this.restart();
         }
@@ -4856,6 +5993,20 @@ export class Game {
         this.selectedMode = "league";
         return;
       }
+      if (pointInRect(x, y, this.chaosModeButton)) {
+        this.selectedMode = "chaos";
+        this.chaosSelectedSlot = Math.min(this.chaosSelectedSlot, this.chaosFighterCount - 1);
+        return;
+      }
+      if (this.selectedMode === "chaos") {
+        for (const [index, button] of this.chaosCountButtons.entries()) {
+          if (pointInRect(x, y, button)) {
+            this.chaosFighterCount = index + 2;
+            this.chaosSelectedSlot = Math.min(this.chaosSelectedSlot, this.chaosFighterCount - 1);
+            return;
+          }
+        }
+      }
       for (const button of this.classSelectorButtons) {
         if (pointInRect(x, y, button)) {
           this.cycleSelectedClass(button.fighterIndex, button.direction);
@@ -4865,7 +6016,8 @@ export class Game {
       for (const button of this.classDetailButtons) {
         if (pointInRect(x, y, button)) {
           this.classDetailOpen = true;
-          this.classDetailClassId = this.selectedClassIds[button.fighterIndex];
+          this.classDetailClassId =
+            this.selectedMode === "chaos" ? this.chaosClassIds[button.fighterIndex] : this.selectedClassIds[button.fighterIndex as 0 | 1];
           this.classDetailTab = "overview";
           return;
         }
@@ -4900,6 +6052,11 @@ export class Game {
 
       if (this.selectedMode === "quick" && pointInRect(x, y, this.startBattleButton)) {
         this.restart();
+        return;
+      }
+
+      if (this.selectedMode === "chaos" && pointInRect(x, y, this.startBattleButton)) {
+        this.startChaosArena();
         return;
       }
 
@@ -5077,10 +6234,16 @@ export class Game {
     }
   }
 
-  private cycleSelectedClass(fighterIndex: 0 | 1, direction: number): void {
-    const currentIndex = playableClasses.findIndex((fighterClass) => fighterClass.id === this.selectedClassIds[fighterIndex]);
+  private cycleSelectedClass(fighterIndex: number, direction: number): void {
+    const classIds = this.selectedMode === "chaos" ? this.chaosClassIds : this.selectedClassIds;
+    const currentIndex = playableClasses.findIndex((fighterClass) => fighterClass.id === classIds[fighterIndex]);
     const nextIndex = (currentIndex + direction + playableClasses.length) % playableClasses.length;
-    this.selectedClassIds[fighterIndex] = playableClasses[nextIndex].id;
+    if (this.selectedMode === "chaos") {
+      this.chaosClassIds[fighterIndex] = playableClasses[nextIndex].id;
+      this.chaosSelectedSlot = clamp(fighterIndex, 0, this.chaosFighterCount - 1);
+    } else if (fighterIndex === 0 || fighterIndex === 1) {
+      this.selectedClassIds[fighterIndex] = playableClasses[nextIndex].id;
+    }
   }
 }
 
@@ -5104,6 +6267,33 @@ function makeVelocity(x: number, y: number, speed: number): Vec2 {
   };
 }
 
+function slotLabelForIndex(index: number): string {
+  return String.fromCharCode(65 + index);
+}
+
+function fighterLabelFor(fighter: Fighter, index: number): string {
+  if (fighter.id === "left") {
+    return "Fighter A";
+  }
+  if (fighter.id === "right") {
+    return "Fighter B";
+  }
+  return `Fighter ${slotLabelForIndex(index)}`;
+}
+
+function ordinal(value: number): string {
+  if (value === 1) {
+    return "1st";
+  }
+  if (value === 2) {
+    return "2nd";
+  }
+  if (value === 3) {
+    return "3rd";
+  }
+  return `${value}th`;
+}
+
 function pointInRect(x: number, y: number, rect: Rect): boolean {
   return x >= rect.x && x <= rect.x + rect.w && y >= rect.y && y <= rect.y + rect.h;
 }
@@ -5121,6 +6311,7 @@ function cloneStats(stats: FighterStats): FighterStats {
     dashDamage: stats.dashDamage,
     burnDamage: stats.burnDamage,
     poisonDamage: stats.poisonDamage,
+    bleedDamage: stats.bleedDamage,
     counterDamage: stats.counterDamage,
     abilityDamage: stats.abilityDamage,
     collisionDamage: stats.collisionDamage,
@@ -5133,6 +6324,7 @@ function cloneStats(stats: FighterStats): FighterStats {
     fighterCollisions: stats.fighterCollisions,
     wallBounces: stats.wallBounces,
     abilityUses: stats.abilityUses,
+    kos: stats.kos,
     statusTicks: stats.statusTicks,
     bombsPlaced: stats.bombsPlaced,
     bombsExploded: stats.bombsExploded,
@@ -5210,6 +6402,47 @@ function cloneStats(stats: FighterStats): FighterStats {
     smokeReflexEvades: stats.smokeReflexEvades,
     wallShadowTriggers: stats.wallShadowTriggers,
     wallShadowBonusDamage: stats.wallShadowBonusDamage,
+    fangContactHits: stats.fangContactHits,
+    bleedStacksApplied: stats.bleedStacksApplied,
+    bloodScentUptime: stats.bloodScentUptime,
+    rendingHuntUses: stats.rendingHuntUses,
+    rendingHuntDamageBonus: stats.rendingHuntDamageBonus,
+    spearThrustUses: stats.spearThrustUses,
+    spearThrustHits: stats.spearThrustHits,
+    spearThrustDamage: stats.spearThrustDamage,
+    idealRangeHits: stats.idealRangeHits,
+    sweetSpotHits: stats.sweetSpotHits,
+    spearRushUses: stats.spearRushUses,
+    spearRushHits: stats.spearRushHits,
+    lanceReadyTriggers: stats.lanceReadyTriggers,
+    guardedStanceUptime: stats.guardedStanceUptime,
+    chargedShotsStarted: stats.chargedShotsStarted,
+    chargedShotsFired: stats.chargedShotsFired,
+    chargedShotsHit: stats.chargedShotsHit,
+    chargedShotDamage: stats.chargedShotDamage,
+    weakpointHits: stats.weakpointHits,
+    deadeyeBeamUses: stats.deadeyeBeamUses,
+    deadeyeBeamHits: stats.deadeyeBeamHits,
+    deadeyeBeamDamage: stats.deadeyeBeamDamage,
+    closeRangePressureTime: stats.closeRangePressureTime,
+    vectorNodesPlaced: stats.vectorNodesPlaced,
+    vectorLinesCreated: stats.vectorLinesCreated,
+    vectorLineHits: stats.vectorLineHits,
+    vectorLineDamage: stats.vectorLineDamage,
+    longestVectorLine: stats.longestVectorLine,
+    vectorWebUses: stats.vectorWebUses,
+    vectorWebLineHits: stats.vectorWebLineHits,
+    portalsCreated: stats.portalsCreated,
+    portalTeleports: stats.portalTeleports,
+    exitPulseHits: stats.exitPulseHits,
+    exitPulseDamage: stats.exitPulseDamage,
+    riftShotFired: stats.riftShotFired,
+    riftShotHits: stats.riftShotHits,
+    riftShotDamage: stats.riftShotDamage,
+    riftStrikeHits: stats.riftStrikeHits,
+    riftStrikeDamage: stats.riftStrikeDamage,
+    riftGateUses: stats.riftGateUses,
+    postTeleportDamagePrevented: stats.postTeleportDamagePrevented,
     glassChargesBlocked: stats.glassChargesBlocked,
     glassChargesRestored: stats.glassChargesRestored,
     glassChargeBreaks: stats.glassChargeBreaks,
@@ -5223,6 +6456,7 @@ function cloneStats(stats: FighterStats): FighterStats {
     guardCounters: stats.guardCounters,
     burnUptime: stats.burnUptime,
     poisonUptime: stats.poisonUptime,
+    bleedUptime: stats.bleedUptime,
     slowUptime: stats.slowUptime
   };
 }
@@ -5239,6 +6473,7 @@ function addStats(total: FighterStats, stats: FighterStats): void {
   total.dashDamage += stats.dashDamage;
   total.burnDamage += stats.burnDamage;
   total.poisonDamage += stats.poisonDamage;
+  total.bleedDamage += stats.bleedDamage;
   total.counterDamage += stats.counterDamage;
   total.abilityDamage += stats.abilityDamage;
   total.collisionDamage += stats.collisionDamage;
@@ -5251,6 +6486,7 @@ function addStats(total: FighterStats, stats: FighterStats): void {
   total.fighterCollisions += stats.fighterCollisions;
   total.wallBounces += stats.wallBounces;
   total.abilityUses += stats.abilityUses;
+  total.kos += stats.kos;
   total.statusTicks += stats.statusTicks;
   total.bombsPlaced += stats.bombsPlaced;
   total.bombsExploded += stats.bombsExploded;
@@ -5328,6 +6564,47 @@ function addStats(total: FighterStats, stats: FighterStats): void {
   total.smokeReflexEvades += stats.smokeReflexEvades;
   total.wallShadowTriggers += stats.wallShadowTriggers;
   total.wallShadowBonusDamage += stats.wallShadowBonusDamage;
+  total.fangContactHits += stats.fangContactHits;
+  total.bleedStacksApplied += stats.bleedStacksApplied;
+  total.bloodScentUptime += stats.bloodScentUptime;
+  total.rendingHuntUses += stats.rendingHuntUses;
+  total.rendingHuntDamageBonus += stats.rendingHuntDamageBonus;
+  total.spearThrustUses += stats.spearThrustUses;
+  total.spearThrustHits += stats.spearThrustHits;
+  total.spearThrustDamage += stats.spearThrustDamage;
+  total.idealRangeHits += stats.idealRangeHits;
+  total.sweetSpotHits += stats.sweetSpotHits;
+  total.spearRushUses += stats.spearRushUses;
+  total.spearRushHits += stats.spearRushHits;
+  total.lanceReadyTriggers += stats.lanceReadyTriggers;
+  total.guardedStanceUptime += stats.guardedStanceUptime;
+  total.chargedShotsStarted += stats.chargedShotsStarted;
+  total.chargedShotsFired += stats.chargedShotsFired;
+  total.chargedShotsHit += stats.chargedShotsHit;
+  total.chargedShotDamage += stats.chargedShotDamage;
+  total.weakpointHits += stats.weakpointHits;
+  total.deadeyeBeamUses += stats.deadeyeBeamUses;
+  total.deadeyeBeamHits += stats.deadeyeBeamHits;
+  total.deadeyeBeamDamage += stats.deadeyeBeamDamage;
+  total.closeRangePressureTime += stats.closeRangePressureTime;
+  total.vectorNodesPlaced += stats.vectorNodesPlaced;
+  total.vectorLinesCreated += stats.vectorLinesCreated;
+  total.vectorLineHits += stats.vectorLineHits;
+  total.vectorLineDamage += stats.vectorLineDamage;
+  total.longestVectorLine = Math.max(total.longestVectorLine, stats.longestVectorLine);
+  total.vectorWebUses += stats.vectorWebUses;
+  total.vectorWebLineHits += stats.vectorWebLineHits;
+  total.portalsCreated += stats.portalsCreated;
+  total.portalTeleports += stats.portalTeleports;
+  total.exitPulseHits += stats.exitPulseHits;
+  total.exitPulseDamage += stats.exitPulseDamage;
+  total.riftShotFired += stats.riftShotFired;
+  total.riftShotHits += stats.riftShotHits;
+  total.riftShotDamage += stats.riftShotDamage;
+  total.riftStrikeHits += stats.riftStrikeHits;
+  total.riftStrikeDamage += stats.riftStrikeDamage;
+  total.riftGateUses += stats.riftGateUses;
+  total.postTeleportDamagePrevented += stats.postTeleportDamagePrevented;
   total.glassChargesBlocked += stats.glassChargesBlocked;
   total.glassChargesRestored += stats.glassChargesRestored;
   total.glassChargeBreaks += stats.glassChargeBreaks;
@@ -5341,6 +6618,7 @@ function addStats(total: FighterStats, stats: FighterStats): void {
   total.guardCounters += stats.guardCounters;
   total.burnUptime += stats.burnUptime;
   total.poisonUptime += stats.poisonUptime;
+  total.bleedUptime += stats.bleedUptime;
   total.slowUptime += stats.slowUptime;
 }
 
@@ -5365,6 +6643,7 @@ function addScaledStats(total: FighterStats, stats: FighterStats, scale: number)
   total.dashDamage += stats.dashDamage * scale;
   total.burnDamage += stats.burnDamage * scale;
   total.poisonDamage += stats.poisonDamage * scale;
+  total.bleedDamage += stats.bleedDamage * scale;
   total.counterDamage += stats.counterDamage * scale;
   total.abilityDamage += stats.abilityDamage * scale;
   total.collisionDamage += stats.collisionDamage * scale;
@@ -5377,6 +6656,7 @@ function addScaledStats(total: FighterStats, stats: FighterStats, scale: number)
   total.fighterCollisions += stats.fighterCollisions * scale;
   total.wallBounces += stats.wallBounces * scale;
   total.abilityUses += stats.abilityUses * scale;
+  total.kos += stats.kos * scale;
   total.statusTicks += stats.statusTicks * scale;
   total.bombsPlaced += stats.bombsPlaced * scale;
   total.bombsExploded += stats.bombsExploded * scale;
@@ -5454,6 +6734,47 @@ function addScaledStats(total: FighterStats, stats: FighterStats, scale: number)
   total.smokeReflexEvades += stats.smokeReflexEvades * scale;
   total.wallShadowTriggers += stats.wallShadowTriggers * scale;
   total.wallShadowBonusDamage += stats.wallShadowBonusDamage * scale;
+  total.fangContactHits += stats.fangContactHits * scale;
+  total.bleedStacksApplied += stats.bleedStacksApplied * scale;
+  total.bloodScentUptime += stats.bloodScentUptime * scale;
+  total.rendingHuntUses += stats.rendingHuntUses * scale;
+  total.rendingHuntDamageBonus += stats.rendingHuntDamageBonus * scale;
+  total.spearThrustUses += stats.spearThrustUses * scale;
+  total.spearThrustHits += stats.spearThrustHits * scale;
+  total.spearThrustDamage += stats.spearThrustDamage * scale;
+  total.idealRangeHits += stats.idealRangeHits * scale;
+  total.sweetSpotHits += stats.sweetSpotHits * scale;
+  total.spearRushUses += stats.spearRushUses * scale;
+  total.spearRushHits += stats.spearRushHits * scale;
+  total.lanceReadyTriggers += stats.lanceReadyTriggers * scale;
+  total.guardedStanceUptime += stats.guardedStanceUptime * scale;
+  total.chargedShotsStarted += stats.chargedShotsStarted * scale;
+  total.chargedShotsFired += stats.chargedShotsFired * scale;
+  total.chargedShotsHit += stats.chargedShotsHit * scale;
+  total.chargedShotDamage += stats.chargedShotDamage * scale;
+  total.weakpointHits += stats.weakpointHits * scale;
+  total.deadeyeBeamUses += stats.deadeyeBeamUses * scale;
+  total.deadeyeBeamHits += stats.deadeyeBeamHits * scale;
+  total.deadeyeBeamDamage += stats.deadeyeBeamDamage * scale;
+  total.closeRangePressureTime += stats.closeRangePressureTime * scale;
+  total.vectorNodesPlaced += stats.vectorNodesPlaced * scale;
+  total.vectorLinesCreated += stats.vectorLinesCreated * scale;
+  total.vectorLineHits += stats.vectorLineHits * scale;
+  total.vectorLineDamage += stats.vectorLineDamage * scale;
+  total.longestVectorLine = Math.max(total.longestVectorLine, stats.longestVectorLine);
+  total.vectorWebUses += stats.vectorWebUses * scale;
+  total.vectorWebLineHits += stats.vectorWebLineHits * scale;
+  total.portalsCreated += stats.portalsCreated * scale;
+  total.portalTeleports += stats.portalTeleports * scale;
+  total.exitPulseHits += stats.exitPulseHits * scale;
+  total.exitPulseDamage += stats.exitPulseDamage * scale;
+  total.riftShotFired += stats.riftShotFired * scale;
+  total.riftShotHits += stats.riftShotHits * scale;
+  total.riftShotDamage += stats.riftShotDamage * scale;
+  total.riftStrikeHits += stats.riftStrikeHits * scale;
+  total.riftStrikeDamage += stats.riftStrikeDamage * scale;
+  total.riftGateUses += stats.riftGateUses * scale;
+  total.postTeleportDamagePrevented += stats.postTeleportDamagePrevented * scale;
   total.glassChargesBlocked += stats.glassChargesBlocked * scale;
   total.glassChargesRestored += stats.glassChargesRestored * scale;
   total.glassChargeBreaks += stats.glassChargeBreaks * scale;
@@ -5467,6 +6788,7 @@ function addScaledStats(total: FighterStats, stats: FighterStats, scale: number)
   total.guardCounters += stats.guardCounters * scale;
   total.burnUptime += stats.burnUptime * scale;
   total.poisonUptime += stats.poisonUptime * scale;
+  total.bleedUptime += stats.bleedUptime * scale;
   total.slowUptime += stats.slowUptime * scale;
 }
 
@@ -5510,6 +6832,37 @@ function createTournamentCell(
 
 function shortClassName(displayName: string): string {
   return displayName.replace(" Ball", "");
+}
+
+function getShortSkillName(fighterClass: FighterClass): string {
+  const byClassId: Record<string, string> = {
+    chrono: "TIME STOP",
+    blade: "DASH",
+    shield: "GUARD",
+    fire: "FLAME",
+    thunder: "CHAIN",
+    poison: "CLOUD",
+    gravity: "WELL",
+    vampire: "FEAST",
+    bomb: "DETONATE",
+    mirror: "MIRROR",
+    magnet: "STORM",
+    ricochet: "BARRAGE",
+    reaper: "REAP",
+    crusher: "CRUSH",
+    spike: "ARMOR",
+    monk: "PALM",
+    berserker: "RAGE",
+    drill: "DRILL",
+    ninja: "SHADOW",
+    fang: "HUNT",
+    spear: "RUSH",
+    sniper: "DEADEYE",
+    vector: "WEB",
+    portal: "RIFT",
+    glass: "PRISM"
+  };
+  return byClassId[fighterClass.id] ?? fighterClass.abilityName.toUpperCase();
 }
 
 function matrixColor(winRate: number): string {

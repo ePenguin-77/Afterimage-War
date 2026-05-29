@@ -21,6 +21,33 @@ export type RunModifiers = {
   poisonDamageMultiplier: number;
   poisonDurationMultiplier: number;
   poisonChargeDebuffBonus: number;
+  bleedDamageMultiplier: number;
+  bleedDurationBonus: number;
+  fangBleedBonusDamage: number;
+  fangBloodScentChargeBonus: number;
+  fangRendingHuntDurationBonus: number;
+  spearThrustRangeBonus: number;
+  spearThrustDamageMultiplier: number;
+  spearThrustCooldownReduction: number;
+  spearRushDurationBonus: number;
+  spearIdealRangeBonus: number;
+  spearLanceReadyRangeBonus: number;
+  sniperShotDamageMultiplier: number;
+  sniperChargeTimeReduction: number;
+  sniperBeamDamageMultiplier: number;
+  sniperBeamWidthBonus: number;
+  sniperWeakpointBonus: number;
+  vectorLineDurationBonus: number;
+  vectorLineDamageMultiplier: number;
+  vectorLineWidthBonus: number;
+  vectorWebDurationBonus: number;
+  vectorLongLineThresholdReduction: number;
+  portalDurationBonus: number;
+  portalTeleportCooldownReduction: number;
+  portalRiftStrikeBonusDamage: number;
+  portalPostTeleportReductionBonus: number;
+  portalRiftGateDurationBonus: number;
+  portalRadiusBonus: number;
   gravitySuppressionBonus: number;
   gravityMarkDurationBonus: number;
   vampireLifestealBonus: number;
@@ -161,6 +188,33 @@ export function createDefaultRunModifiers(): RunModifiers {
     poisonDamageMultiplier: 1,
     poisonDurationMultiplier: 1,
     poisonChargeDebuffBonus: 0,
+    bleedDamageMultiplier: 1,
+    bleedDurationBonus: 0,
+    fangBleedBonusDamage: 0,
+    fangBloodScentChargeBonus: 0,
+    fangRendingHuntDurationBonus: 0,
+    spearThrustRangeBonus: 0,
+    spearThrustDamageMultiplier: 1,
+    spearThrustCooldownReduction: 0,
+    spearRushDurationBonus: 0,
+    spearIdealRangeBonus: 0,
+    spearLanceReadyRangeBonus: 0,
+    sniperShotDamageMultiplier: 1,
+    sniperChargeTimeReduction: 0,
+    sniperBeamDamageMultiplier: 1,
+    sniperBeamWidthBonus: 0,
+    sniperWeakpointBonus: 0,
+    vectorLineDurationBonus: 0,
+    vectorLineDamageMultiplier: 1,
+    vectorLineWidthBonus: 0,
+    vectorWebDurationBonus: 0,
+    vectorLongLineThresholdReduction: 0,
+    portalDurationBonus: 0,
+    portalTeleportCooldownReduction: 0,
+    portalRiftStrikeBonusDamage: 0,
+    portalPostTeleportReductionBonus: 0,
+    portalRiftGateDurationBonus: 0,
+    portalRadiusBonus: 0,
     gravitySuppressionBonus: 0,
     gravityMarkDurationBonus: 0,
     vampireLifestealBonus: 0,
@@ -307,6 +361,33 @@ export function getRunModifierSummary(modifiers: RunModifiers, maxLines = 8): st
   addFlatPercent(lines, "Armor Reduction", modifiers.armorReductionBonus);
   addFlatPercent(lines, "Mirror Evade", modifiers.mirrorEvadeBonus);
   addFlatPercent(lines, "Poison Charge Debuff", modifiers.poisonChargeDebuffBonus);
+  addMultiplier(lines, "Bleed Damage", modifiers.bleedDamageMultiplier);
+  addFlatNumber(lines, "Bleed Duration", modifiers.bleedDurationBonus, "s");
+  addFlatPercent(lines, "Bleeding Target Damage", modifiers.fangBleedBonusDamage);
+  addFlatPercent(lines, "Blood Scent Charge", modifiers.fangBloodScentChargeBonus);
+  addFlatNumber(lines, "Rending Hunt Duration", modifiers.fangRendingHuntDurationBonus, "s");
+  addFlatNumber(lines, "Spear Reach", modifiers.spearThrustRangeBonus);
+  addMultiplier(lines, "Spear Thrust Damage", modifiers.spearThrustDamageMultiplier);
+  addFlatNumber(lines, "Spear Thrust Cooldown", -modifiers.spearThrustCooldownReduction, "s");
+  addFlatNumber(lines, "Spear Rush Duration", modifiers.spearRushDurationBonus, "s");
+  addFlatPercent(lines, "Ideal Range Damage", modifiers.spearIdealRangeBonus);
+  addFlatNumber(lines, "Lance Ready Reach", modifiers.spearLanceReadyRangeBonus);
+  addMultiplier(lines, "Charged Shot Damage", modifiers.sniperShotDamageMultiplier);
+  addFlatNumber(lines, "Charged Shot Lock", -modifiers.sniperChargeTimeReduction, "s");
+  addMultiplier(lines, "Deadeye Damage", modifiers.sniperBeamDamageMultiplier);
+  addFlatNumber(lines, "Deadeye Width", modifiers.sniperBeamWidthBonus);
+  addFlatPercent(lines, "Weakpoint Damage", modifiers.sniperWeakpointBonus);
+  addFlatNumber(lines, "Vector Line Duration", modifiers.vectorLineDurationBonus, "s");
+  addMultiplier(lines, "Vector Line Damage", modifiers.vectorLineDamageMultiplier);
+  addFlatNumber(lines, "Vector Line Width", modifiers.vectorLineWidthBonus);
+  addFlatNumber(lines, "Vector Web Duration", modifiers.vectorWebDurationBonus, "s");
+  addFlatNumber(lines, "Long Geometry Threshold", -modifiers.vectorLongLineThresholdReduction);
+  addFlatNumber(lines, "Portal Duration", modifiers.portalDurationBonus, "s");
+  addFlatNumber(lines, "Teleport Cooldown", -modifiers.portalTeleportCooldownReduction, "s");
+  addFlatNumber(lines, "Rift Strike Damage", modifiers.portalRiftStrikeBonusDamage);
+  addFlatPercent(lines, "Post-Teleport Guard", modifiers.portalPostTeleportReductionBonus);
+  addFlatNumber(lines, "Rift Gate Duration", modifiers.portalRiftGateDurationBonus, "s");
+  addFlatNumber(lines, "Portal Radius", modifiers.portalRadiusBonus);
   addFlatNumber(lines, "Dash Duration", modifiers.dashDurationBonus, "s");
   addFlatNumber(lines, "Dash Graze Radius", modifiers.dashGrazeRadiusBonus);
   addFlatNumber(lines, "Time Stop Duration", modifiers.timeStopDurationBonus, "s");
@@ -403,11 +484,54 @@ export function getBuildFocusTags(modifiers: RunModifiers): string[] {
   if (
     modifiers.burnDamageMultiplier > 1.01 ||
     modifiers.poisonDamageMultiplier > 1.01 ||
+    modifiers.bleedDamageMultiplier > 1.01 ||
+    modifiers.bleedDurationBonus > 0 ||
     modifiers.statusDurationMultiplier > 1.01 ||
     modifiers.statusTakenDurationMultiplier < 0.995 ||
     modifiers.poisonChargeDebuffBonus > 0
   ) {
     tags.push("Status Build");
+  }
+  if (modifiers.fangBleedBonusDamage > 0 || modifiers.fangBloodScentChargeBonus > 0 || modifiers.fangRendingHuntDurationBonus > 0) {
+    tags.push("Bleed Hunter");
+  }
+  if (
+    modifiers.spearThrustRangeBonus > 0 ||
+    modifiers.spearThrustDamageMultiplier > 1.01 ||
+    modifiers.spearThrustCooldownReduction > 0 ||
+    modifiers.spearRushDurationBonus > 0 ||
+    modifiers.spearIdealRangeBonus > 0 ||
+    modifiers.spearLanceReadyRangeBonus > 0
+  ) {
+    tags.push("Reach Build");
+  }
+  if (
+    modifiers.sniperShotDamageMultiplier > 1.01 ||
+    modifiers.sniperChargeTimeReduction > 0 ||
+    modifiers.sniperBeamDamageMultiplier > 1.01 ||
+    modifiers.sniperBeamWidthBonus > 0 ||
+    modifiers.sniperWeakpointBonus > 0
+  ) {
+    tags.push("Precision Build");
+  }
+  if (
+    modifiers.vectorLineDurationBonus > 0 ||
+    modifiers.vectorLineDamageMultiplier > 1.01 ||
+    modifiers.vectorLineWidthBonus > 0 ||
+    modifiers.vectorWebDurationBonus > 0 ||
+    modifiers.vectorLongLineThresholdReduction > 0
+  ) {
+    tags.push("Trap Build");
+  }
+  if (
+    modifiers.portalDurationBonus > 0 ||
+    modifiers.portalTeleportCooldownReduction > 0 ||
+    modifiers.portalRiftStrikeBonusDamage > 0 ||
+    modifiers.portalPostTeleportReductionBonus > 0 ||
+    modifiers.portalRiftGateDurationBonus > 0 ||
+    modifiers.portalRadiusBonus > 0
+  ) {
+    tags.push("Rift Build");
   }
   if (modifiers.vampireLifestealBonus > 0) {
     tags.push("Lifesteal Build");

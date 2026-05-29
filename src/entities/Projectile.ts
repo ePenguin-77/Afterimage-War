@@ -46,6 +46,8 @@ export class Projectile {
     | "bankShot"
     | "barrageBankShot"
     | "soulBlade"
+    | "sniperShot"
+    | "riftShot"
     | "prismShot";
   burn?: BurnOptions;
   poison?: PoisonOptions;
@@ -61,6 +63,7 @@ export class Projectile {
   perfectBankHitRadiusBonus = 0;
   perfectBankFlatDamage = 0;
   ricochetBonusGranted = false;
+  knockback: number;
 
   constructor(options: {
     owner: Fighter;
@@ -85,6 +88,8 @@ export class Projectile {
       | "bankShot"
       | "barrageBankShot"
       | "soulBlade"
+      | "sniperShot"
+      | "riftShot"
       | "prismShot";
     burn?: BurnOptions;
     poison?: PoisonOptions;
@@ -98,6 +103,7 @@ export class Projectile {
     bouncedHitRadiusBonus?: number;
     perfectBankHitRadiusBonus?: number;
     perfectBankFlatDamage?: number;
+    knockback?: number;
   }) {
     this.owner = options.owner;
     this.position = copyVec(options.position);
@@ -123,6 +129,7 @@ export class Projectile {
     this.bouncedHitRadiusBonus = options.bouncedHitRadiusBonus ?? 0;
     this.perfectBankHitRadiusBonus = options.perfectBankHitRadiusBonus ?? 0;
     this.perfectBankFlatDamage = options.perfectBankFlatDamage ?? 0;
+    this.knockback = options.knockback ?? CHRONO.projectileKnockback;
   }
 
   update(dt: number, game: Game): void {
@@ -155,8 +162,10 @@ export class Projectile {
       return;
     }
 
-    const enemy = game.getEnemyOf(this.owner);
-    if (!enemy.defeated && circleOverlap(this.position, this.hitRadius, enemy.position, enemy.radius)) {
+    for (const enemy of game.getProjectileTargets(this.owner)) {
+      if (!circleOverlap(this.position, this.hitRadius, enemy.position, enemy.radius)) {
+        continue;
+      }
       if (game.tryMagnetProjectileBlock(this, enemy)) {
         this.remove = true;
         return;
@@ -165,10 +174,24 @@ export class Projectile {
       const hpBefore = enemy.hp;
       const hitDamage = this.getCurrentDamage();
       enemy.takeDamage(hitDamage, this.owner, game, {
-        knockback: CHRONO.projectileKnockback,
+        knockback: this.knockback,
         hitColor: this.secondaryColor,
         damageKind: this.damageKind
       });
+      if (this.kind === "sniperShot" && hpBefore > enemy.hp) {
+        const actualDamage = Math.max(0, hpBefore - enemy.hp);
+        this.owner.stats.chargedShotsHit += 1;
+        this.owner.stats.chargedShotDamage += actualDamage;
+        if (hpBefore / Math.max(1, enemy.maxHP) <= BALANCE.sniper.weakpointThreshold) {
+          this.owner.stats.weakpointHits += 1;
+        }
+      }
+      if (this.kind === "riftShot" && hpBefore > enemy.hp) {
+        const actualDamage = Math.max(0, hpBefore - enemy.hp);
+        this.owner.stats.riftShotHits += 1;
+        this.owner.stats.riftShotDamage += actualDamage;
+        game.spawnGravitySpark(enemy.position, this.secondaryColor);
+      }
       this.recordRicochetHit(game, hitDamage);
       if (this.kind === "timeShard" && CHRONO.projectileSlowDuration > 0 && CHRONO.projectileSlowPercent > 0) {
         enemy.applySlow(CHRONO.projectileSlowDuration * this.owner.runModifiers.statusDurationMultiplier, 1 - CHRONO.projectileSlowPercent);
@@ -192,6 +215,7 @@ export class Projectile {
         game.spawnReaperSpark(enemy.position, this.secondaryColor);
       }
       this.remove = true;
+      return;
     }
 
     if (!insideRect(this.position, game.arena, 40) || this.life <= 0) {
@@ -458,6 +482,49 @@ export class Projectile {
       ctx.beginPath();
       ctx.moveTo(10, -6);
       ctx.lineTo(-10, 5);
+      ctx.stroke();
+    } else if (this.kind === "sniperShot") {
+      ctx.shadowColor = this.secondaryColor;
+      ctx.shadowBlur = 18;
+      ctx.fillStyle = "#fff1f1";
+      ctx.strokeStyle = "#22070c";
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(22, 0);
+      ctx.lineTo(3, -6);
+      ctx.lineTo(-18, -3);
+      ctx.lineTo(-10, 0);
+      ctx.lineTo(-18, 3);
+      ctx.lineTo(3, 6);
+      ctx.closePath();
+      ctx.fill();
+      ctx.stroke();
+      ctx.strokeStyle = this.secondaryColor;
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.moveTo(14, 0);
+      ctx.lineTo(-8, 0);
+      ctx.stroke();
+    } else if (this.kind === "riftShot") {
+      ctx.shadowColor = this.secondaryColor;
+      ctx.shadowBlur = 18;
+      ctx.fillStyle = "#dffbff";
+      ctx.strokeStyle = "#071323";
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(19, 0);
+      ctx.lineTo(4, -10);
+      ctx.lineTo(-16, -4);
+      ctx.lineTo(-9, 0);
+      ctx.lineTo(-16, 4);
+      ctx.lineTo(4, 10);
+      ctx.closePath();
+      ctx.fill();
+      ctx.stroke();
+      ctx.strokeStyle = this.secondaryColor;
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.arc(0, 0, 12, -0.7, 0.7);
       ctx.stroke();
     } else {
       ctx.beginPath();

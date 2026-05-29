@@ -32,6 +32,7 @@ export type DamageKind =
   | "counter"
   | "burn"
   | "poison"
+  | "bleed"
   | "field"
   | "explosion"
   | "ability"

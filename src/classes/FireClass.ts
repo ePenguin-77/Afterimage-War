@@ -85,25 +85,29 @@ export const FireClass: FighterClass = {
 
   specialAbility({ game, self, enemy }: FighterClassContext): void {
     const radius = BALANCE.fire.flameBurstRadius + self.runModifiers.flameBurstRadiusBonus;
-    const inRange = self.distanceTo(enemy) <= radius + enemy.radius;
+    const enemies = game.getEnemies(self);
+    const targets = enemies.length > 0 ? enemies.filter((target) => self.distanceTo(target) <= radius + target.radius) : [];
+    const inRange = targets.length > 0 || self.distanceTo(enemy) <= radius + enemy.radius;
     game.spawnFlameBurstEffect(self.position, radius, inRange);
     game.spawnAbilityText("FLAME BURST", this.secondaryColor, self.position);
 
-    if (!inRange) {
+    if (targets.length <= 0) {
       return;
     }
 
-    enemy.takeDamage(BALANCE.fire.flameBurstDamage, self, game, {
-      hitColor: this.secondaryColor,
-      ignoreCooldown: true,
-      damageKind: "ability"
-    });
-    applyBurn(enemy, self, {
-      damagePerSecond: BALANCE.fire.burnDamagePerSecond,
-      duration: BALANCE.fire.flameBurstBurnDuration * self.runModifiers.burnDurationMultiplier,
-      stacks: BALANCE.fire.flameBurstBurnStacks,
-      maxStacks: BALANCE.fire.maxBurnStacks
-    });
+    for (const target of targets) {
+      target.takeDamage(BALANCE.fire.flameBurstDamage, self, game, {
+        hitColor: this.secondaryColor,
+        ignoreCooldown: true,
+        damageKind: "ability"
+      });
+      applyBurn(target, self, {
+        damagePerSecond: BALANCE.fire.burnDamagePerSecond,
+        duration: BALANCE.fire.flameBurstBurnDuration * self.runModifiers.burnDurationMultiplier,
+        stacks: BALANCE.fire.flameBurstBurnStacks,
+        maxStacks: BALANCE.fire.maxBurnStacks
+      });
+    }
   },
 
   drawWeapon(ctx: CanvasRenderingContext2D, fighter, time): void {

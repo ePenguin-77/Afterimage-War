@@ -5,6 +5,7 @@ import { BladeClass } from "./BladeClass";
 import { ChronoClass } from "./ChronoClass";
 import { CrusherClass } from "./CrusherClass";
 import { DrillClass } from "./DrillClass";
+import { FangClass } from "./FangClass";
 import { FireClass } from "./FireClass";
 import { GlassClass } from "./GlassClass";
 import { GravityClass } from "./GravityClass";
@@ -13,12 +14,16 @@ import { MirrorClass } from "./MirrorClass";
 import { MonkClass } from "./MonkClass";
 import { NinjaClass } from "./NinjaClass";
 import { PoisonClass } from "./PoisonClass";
+import { PortalClass } from "./PortalClass";
 import { RicochetClass } from "./RicochetClass";
 import { ReaperClass } from "./ReaperClass";
 import { ShieldClass } from "./ShieldClass";
 import { SpikeClass } from "./SpikeClass";
+import { SpearClass } from "./SpearClass";
+import { SniperClass } from "./SniperClass";
 import { ThunderClass } from "./ThunderClass";
 import { VampireClass } from "./VampireClass";
+import { VectorClass } from "./VectorClass";
 
 export type ComingSoonClassPreview = {
   id: string;
@@ -49,6 +54,11 @@ export const playableClasses: FighterClass[] = [
   BerserkerClass,
   DrillClass,
   NinjaClass,
+  FangClass,
+  SpearClass,
+  SniperClass,
+  VectorClass,
+  PortalClass,
   GlassClass
 ];
 
@@ -261,6 +271,61 @@ const classMeta: Record<string, FighterClassMeta> = {
     weaknesses: ["Thorns and counters", "Area damage", "Needs dash connections"],
     recommendedUpgrades: ["Extra Shadow", "Sharp Strike", "Smoke Master"],
     matchupHints: ["Good into projectile-heavy classes when Shadow Step connects", "Be careful into Spike, Shield, Fire, and Bomb"]
+  },
+  fang: {
+    difficulty: "Medium",
+    basicAttackName: "Fang Contact",
+    basicAttackDescription: "Deals contact damage on fighter collisions and applies Bleed.",
+    passiveName: "Blood Scent",
+    passiveDescription: "Deals more contact damage and charges faster against enemies bleeding from Fang hits.",
+    strengths: ["Bleed uptime", "Aggressive contact pressure", "Bonus damage against wounded targets"],
+    weaknesses: ["Needs contact", "Thorns and counters", "Ranged kiting"],
+    recommendedUpgrades: ["Sharper Fangs", "Deep Wound", "Savage Bite"],
+    matchupHints: ["Pressures sustain classes through Bleed", "Be careful into Spike, Shield, and strong projectile zoning"]
+  },
+  spear: {
+    difficulty: "Medium",
+    basicAttackName: "Spear Thrust",
+    basicAttackDescription: "Strikes at mid-range with a sharp lance thrust toward the selected target.",
+    passiveName: "Guarded Reach",
+    passiveDescription: "Spear Thrust deals bonus damage when enemies are inside spear range but outside direct body contact.",
+    strengths: ["Mid-range poke", "Punishes approaches", "Spear Rush pressure"],
+    weaknesses: ["Long-range zoning", "Needs line alignment", "Can be rushed between thrusts"],
+    recommendedUpgrades: ["Longer Reach", "Sharper Tip", "Piercing Focus"],
+    matchupHints: ["Good into melee approaches", "Magnet cannot block thrusts, but true ranged classes can keep distance"]
+  },
+  sniper: {
+    difficulty: "Hard",
+    basicAttackName: "Charged Shot",
+    basicAttackDescription: "Locks an aim line, charges briefly, then fires a fast precision shot without homing after release.",
+    passiveName: "Weakpoint Aim",
+    passiveDescription: "Charged Shots deal bonus damage against enemies below 35% HP, with a stronger bonus below 20%.",
+    strengths: ["Long-range burst", "Punishes predictable paths", "Finishes low HP targets"],
+    weaknesses: ["Low HP", "Slow firing rhythm", "Melee pressure"],
+    recommendedUpgrades: ["Sharper Shot", "Faster Lock", "Deadeye Focus"],
+    matchupHints: ["Strong when it keeps distance", "Blade, Ninja, and other melee classes are dangerous once they connect"]
+  },
+  vector: {
+    difficulty: "Hard",
+    basicAttackName: "Vector Link",
+    basicAttackDescription: "Uses wall bounces to place nodes and connect them into damaging laser lines.",
+    passiveName: "Clean Geometry",
+    passiveDescription: "Longer wall-linked lines deal more damage and reward clean cross-arena angles.",
+    strengths: ["Wall-link traps", "Punishes crossing paths", "Strong arena control"],
+    weaknesses: ["Needs wall bounces", "Low direct pressure", "Can miss if lines expire unused"],
+    recommendedUpgrades: ["Longer Link", "Sharper Line", "Extra Segment"],
+    matchupHints: ["Strong when enemies cross lanes", "Ranged classes can pressure before the web is built"]
+  },
+  portal: {
+    difficulty: "Hard",
+    basicAttackName: "Wall Gate",
+    basicAttackDescription: "Places a portal on one wall bounce, then links it to a second wall portal on the next bounce.",
+    passiveName: "Rift Strike",
+    passiveDescription: "After teleporting, the next contact hit briefly gains bonus damage.",
+    strengths: ["Unusual repositioning", "Surprise contact angles", "Wall-bounce mobility"],
+    weaknesses: ["Low raw damage", "Only owner can use portals", "Needs wall setup"],
+    recommendedUpgrades: ["Longer Gate", "Quick Rift", "Sharp Exit"],
+    matchupHints: ["Use portals to dodge ranged lanes", "Contact classes with counters still punish bad exits"]
   },
   glass: {
     difficulty: "Hard",

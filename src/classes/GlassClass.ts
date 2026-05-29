@@ -46,7 +46,7 @@ export const GlassClass: FighterClass = {
     }
 
     const charges = getGlassCharges(self);
-    const isDot = kind === "burn" || kind === "poison" || kind === "field";
+    const isDot = kind === "burn" || kind === "poison" || kind === "bleed" || kind === "field";
     if (isDot) {
       if (charges > 0) {
         self.stats.damagePreventedByGlass += amount;

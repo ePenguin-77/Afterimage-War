@@ -43,6 +43,7 @@ export type FighterStats = {
   dashDamage: number;
   burnDamage: number;
   poisonDamage: number;
+  bleedDamage: number;
   counterDamage: number;
   abilityDamage: number;
   collisionDamage: number;
@@ -55,6 +56,7 @@ export type FighterStats = {
   fighterCollisions: number;
   wallBounces: number;
   abilityUses: number;
+  kos: number;
   statusTicks: number;
   bombsPlaced: number;
   bombsExploded: number;
@@ -132,6 +134,47 @@ export type FighterStats = {
   smokeReflexEvades: number;
   wallShadowTriggers: number;
   wallShadowBonusDamage: number;
+  fangContactHits: number;
+  bleedStacksApplied: number;
+  bloodScentUptime: number;
+  rendingHuntUses: number;
+  rendingHuntDamageBonus: number;
+  spearThrustUses: number;
+  spearThrustHits: number;
+  spearThrustDamage: number;
+  idealRangeHits: number;
+  sweetSpotHits: number;
+  spearRushUses: number;
+  spearRushHits: number;
+  lanceReadyTriggers: number;
+  guardedStanceUptime: number;
+  chargedShotsStarted: number;
+  chargedShotsFired: number;
+  chargedShotsHit: number;
+  chargedShotDamage: number;
+  weakpointHits: number;
+  deadeyeBeamUses: number;
+  deadeyeBeamHits: number;
+  deadeyeBeamDamage: number;
+  closeRangePressureTime: number;
+  vectorNodesPlaced: number;
+  vectorLinesCreated: number;
+  vectorLineHits: number;
+  vectorLineDamage: number;
+  longestVectorLine: number;
+  vectorWebUses: number;
+  vectorWebLineHits: number;
+  portalsCreated: number;
+  portalTeleports: number;
+  exitPulseHits: number;
+  exitPulseDamage: number;
+  riftShotFired: number;
+  riftShotHits: number;
+  riftShotDamage: number;
+  riftStrikeHits: number;
+  riftStrikeDamage: number;
+  riftGateUses: number;
+  postTeleportDamagePrevented: number;
   glassChargesBlocked: number;
   glassChargesRestored: number;
   glassChargeBreaks: number;
@@ -145,6 +188,7 @@ export type FighterStats = {
   guardCounters: number;
   burnUptime: number;
   poisonUptime: number;
+  bleedUptime: number;
   slowUptime: number;
 };
 
@@ -161,6 +205,7 @@ export function createFighterStats(): FighterStats {
     dashDamage: 0,
     burnDamage: 0,
     poisonDamage: 0,
+    bleedDamage: 0,
     counterDamage: 0,
     abilityDamage: 0,
     collisionDamage: 0,
@@ -173,6 +218,7 @@ export function createFighterStats(): FighterStats {
     fighterCollisions: 0,
     wallBounces: 0,
     abilityUses: 0,
+    kos: 0,
     statusTicks: 0,
     bombsPlaced: 0,
     bombsExploded: 0,
@@ -250,6 +296,47 @@ export function createFighterStats(): FighterStats {
     smokeReflexEvades: 0,
     wallShadowTriggers: 0,
     wallShadowBonusDamage: 0,
+    fangContactHits: 0,
+    bleedStacksApplied: 0,
+    bloodScentUptime: 0,
+    rendingHuntUses: 0,
+    rendingHuntDamageBonus: 0,
+    spearThrustUses: 0,
+    spearThrustHits: 0,
+    spearThrustDamage: 0,
+    idealRangeHits: 0,
+    sweetSpotHits: 0,
+    spearRushUses: 0,
+    spearRushHits: 0,
+    lanceReadyTriggers: 0,
+    guardedStanceUptime: 0,
+    chargedShotsStarted: 0,
+    chargedShotsFired: 0,
+    chargedShotsHit: 0,
+    chargedShotDamage: 0,
+    weakpointHits: 0,
+    deadeyeBeamUses: 0,
+    deadeyeBeamHits: 0,
+    deadeyeBeamDamage: 0,
+    closeRangePressureTime: 0,
+    vectorNodesPlaced: 0,
+    vectorLinesCreated: 0,
+    vectorLineHits: 0,
+    vectorLineDamage: 0,
+    longestVectorLine: 0,
+    vectorWebUses: 0,
+    vectorWebLineHits: 0,
+    portalsCreated: 0,
+    portalTeleports: 0,
+    exitPulseHits: 0,
+    exitPulseDamage: 0,
+    riftShotFired: 0,
+    riftShotHits: 0,
+    riftShotDamage: 0,
+    riftStrikeHits: 0,
+    riftStrikeDamage: 0,
+    riftGateUses: 0,
+    postTeleportDamagePrevented: 0,
     glassChargesBlocked: 0,
     glassChargesRestored: 0,
     glassChargeBreaks: 0,
@@ -263,6 +350,7 @@ export function createFighterStats(): FighterStats {
     guardCounters: 0,
     burnUptime: 0,
     poisonUptime: 0,
+    bleedUptime: 0,
     slowUptime: 0
   };
 }
@@ -285,6 +373,9 @@ function applyOutgoingRunModifier(source: Fighter, target: Fighter, amount: numb
       break;
     case "poison":
       nextAmount *= source.runModifiers.poisonDamageMultiplier;
+      break;
+    case "bleed":
+      nextAmount *= source.runModifiers.bleedDamageMultiplier;
       break;
     case "counter":
       nextAmount *= source.runModifiers.counterDamageMultiplier;
@@ -366,6 +457,7 @@ export type VelocityChangeReason =
   | "wall-corner"
   | "fighter-collision"
   | "dash-start"
+  | "portal-teleport"
   | "speed-normalize"
   | "status-speed-only"
   | "none";
@@ -399,6 +491,10 @@ export class Fighter {
   lastWallHit = "none";
   lastVelocityChangeReason: VelocityChangeReason = "none";
   stats: FighterStats = createFighterStats();
+  chaosKoStarted = false;
+  chaosKoHidden = false;
+  chaosKoTimer = 0;
+  chaosKoDuration = 0.6;
 
   constructor(id: string, classDef: FighterClass, position: Vec2) {
     this.id = id;
@@ -414,6 +510,10 @@ export class Fighter {
 
   get defeated(): boolean {
     return this.hp <= 0;
+  }
+
+  get alive(): boolean {
+    return !this.defeated;
   }
 
   update(dt: number, game: Game, enemy: Fighter): void {
@@ -629,6 +729,12 @@ export class Fighter {
     this.flash = 0.16;
 
     if (actualDamage > 0) {
+      if (hpBefore > 0 && this.hp <= 0) {
+        if (source !== this) {
+          source.stats.kos += 1;
+        }
+        game.registerFighterKo(this, source);
+      }
       game.spawnHitEffect(this.position, options?.hitColor ?? source.classDef.primaryColor, actualDamage);
       game.addShake(Math.min(8, 2 + actualDamage * 0.12));
       source.classDef.onDamageDealt?.({
@@ -665,7 +771,7 @@ export class Fighter {
       nextAmount *= this.runModifiers.abilityDamageTakenMultiplier;
     } else if (damageKind === "burn") {
       nextAmount *= this.runModifiers.burnDamageTakenMultiplier;
-    } else if (damageKind === "poison") {
+    } else if (damageKind === "poison" || damageKind === "bleed") {
       nextAmount *= this.runModifiers.poisonDamageTakenMultiplier;
     }
 
@@ -715,6 +821,49 @@ export class Fighter {
     this.drawBody(ctx, time, this.position, 1, 1, false);
     this.classDef.drawWeapon(ctx, this, time);
     this.drawHP(ctx);
+  }
+
+  beginChaosKo(): boolean {
+    if (this.chaosKoStarted) {
+      return false;
+    }
+
+    this.chaosKoStarted = true;
+    this.chaosKoHidden = false;
+    this.chaosKoDuration = 0.6;
+    this.chaosKoTimer = this.chaosKoDuration;
+    this.hp = 0;
+    this.velocity = { x: 0, y: 0 };
+    this.acceleration = { x: 0, y: 0 };
+    this.attackCooldown = Number.POSITIVE_INFINITY;
+    this.contactCooldown = Number.POSITIVE_INFINITY;
+    this.collisionDamageCooldown = Number.POSITIVE_INFINITY;
+    this.afterimages = [];
+    this.customState = {};
+    return true;
+  }
+
+  updateChaosKo(dt: number): void {
+    if (!this.chaosKoStarted || this.chaosKoHidden) {
+      return;
+    }
+
+    this.chaosKoTimer = Math.max(0, this.chaosKoTimer - dt);
+    this.afterimages = [];
+    if (this.chaosKoTimer <= 0) {
+      this.chaosKoHidden = true;
+    }
+  }
+
+  drawChaosKo(ctx: CanvasRenderingContext2D, time: number): void {
+    if (!this.chaosKoStarted || this.chaosKoHidden) {
+      return;
+    }
+
+    const progress = 1 - this.chaosKoTimer / Math.max(0.001, this.chaosKoDuration);
+    const alpha = clamp(1 - progress, 0, 1);
+    const scale = 1 - progress * 0.24;
+    this.drawBody(ctx, time, this.position, alpha, scale, false);
   }
 
   keepInsideArena(arena: Rect): void {
@@ -961,8 +1110,9 @@ export class Fighter {
     ctx.lineWidth = 3;
     ctx.strokeStyle = "#111119";
     ctx.fillStyle = this.classDef.secondaryColor;
-    ctx.strokeText(this.id === "left" ? "A" : "B", 0, -19);
-    ctx.fillText(this.id === "left" ? "A" : "B", 0, -19);
+    const label = getFighterHudLabel(this.id);
+    ctx.strokeText(label, 0, -19);
+    ctx.fillText(label, 0, -19);
 
     ctx.font = "900 28px Arial, sans-serif";
     ctx.textAlign = "center";
@@ -1013,6 +1163,10 @@ export class Fighter {
         source.stats.poisonDamage += amount;
         source.stats.statusTicks += 1;
         break;
+      case "bleed":
+        source.stats.bleedDamage += amount;
+        source.stats.statusTicks += 1;
+        break;
       case "counter":
         source.stats.counterDamage += amount;
         source.stats.counterHits += 1;
@@ -1041,4 +1195,18 @@ export class Fighter {
         break;
     }
   }
+}
+
+function getFighterHudLabel(id: string): string {
+  if (id === "left") {
+    return "A";
+  }
+  if (id === "right") {
+    return "B";
+  }
+  const match = /^chaos-(\d+)$/.exec(id);
+  if (match) {
+    return String.fromCharCode(65 + Number(match[1]));
+  }
+  return id.slice(0, 1).toUpperCase();
 }

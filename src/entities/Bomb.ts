@@ -66,8 +66,8 @@ export class Bomb {
         }
       }
 
-      const enemy = game.getEnemyOf(this.owner);
-      if (!enemy.defeated && circleOverlap(this.position, 11, enemy.position, enemy.radius)) {
+      const enemy = game.getProjectileTargets(this.owner).find((candidate) => circleOverlap(this.position, 11, candidate.position, candidate.radius));
+      if (enemy) {
         enemy.takeDamage(this.directHitDamage, this.owner, game, {
           hitColor: "#ff8a31",
           damageKind: "projectile"
@@ -135,8 +135,8 @@ export class Bomb {
   private explode(game: Game): void {
     this.exploded = true;
     this.owner.stats.bombsExploded += 1;
-    const enemy = game.getEnemyOf(this.owner);
-    const hit = !enemy.defeated && distance(enemy.position, this.position) <= this.radius + enemy.radius;
+    const targets = game.getEnemies(this.owner).filter((enemy) => distance(enemy.position, this.position) <= this.radius + enemy.radius);
+    const hit = targets.length > 0;
     for (const decoy of game.mirrorDecoys) {
       if (decoy.owner !== this.owner && decoy.active && distance(decoy.position, this.position) <= this.radius + decoy.radius) {
         decoy.shatter(game, "#ff8a31");
@@ -149,11 +149,13 @@ export class Bomb {
     }
 
     const falloff = this.type === "chain" ? getChainFalloff(this.chainIndex) : 1;
-    enemy.takeDamage(this.damage * falloff, this.owner, game, {
-      hitColor: "#ff8a31",
-      ignoreCooldown: true,
-      damageKind: "explosion"
-    });
+    for (const enemy of targets) {
+      enemy.takeDamage(this.damage * falloff, this.owner, game, {
+        hitColor: "#ff8a31",
+        ignoreCooldown: true,
+        damageKind: "explosion"
+      });
+    }
   }
 }
 

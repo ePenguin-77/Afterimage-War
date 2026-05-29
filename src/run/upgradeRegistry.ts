@@ -1405,6 +1405,336 @@ export const upgradeRegistry: UpgradeDefinition[] = [
     }
   },
   {
+    id: "sharper-fangs",
+    name: "Sharper Fangs",
+    rarity: "common",
+    allowedClassIds: ["fang"],
+    description: "Fang contact hits bite harder.",
+    effectText: "+8% contact damage",
+    apply: (modifiers) => {
+      modifiers.contactDamageMultiplier *= 1.08;
+    }
+  },
+  {
+    id: "deep-wound",
+    name: "Deep Wound",
+    rarity: "common",
+    allowedClassIds: ["fang"],
+    description: "Bleed lasts longer after Fang contacts.",
+    effectText: "+0.35s Bleed duration",
+    apply: (modifiers) => {
+      modifiers.bleedDurationBonus += 0.35;
+    }
+  },
+  {
+    id: "blood-trail",
+    name: "Blood Trail",
+    rarity: "common",
+    allowedClassIds: ["fang"],
+    description: "Bleed ticks cut a little deeper.",
+    effectText: "+8% Bleed damage",
+    apply: (modifiers) => {
+      modifiers.bleedDamageMultiplier *= 1.08;
+    }
+  },
+  {
+    id: "longer-hunt",
+    name: "Longer Hunt",
+    rarity: "common",
+    allowedClassIds: ["fang"],
+    description: "Rending Hunt stays active longer.",
+    effectText: "+0.3s Rending Hunt",
+    apply: (modifiers) => {
+      modifiers.fangRendingHuntDurationBonus += 0.3;
+    }
+  },
+  {
+    id: "savage-bite",
+    name: "Savage Bite",
+    rarity: "uncommon",
+    allowedClassIds: ["fang"],
+    description: "Bleeding targets take more Fang contact damage.",
+    effectText: "+5% damage vs bleeding",
+    apply: (modifiers) => {
+      modifiers.fangBleedBonusDamage += 0.05;
+    }
+  },
+  {
+    id: "scent-hunter",
+    name: "Scent Hunter",
+    rarity: "uncommon",
+    allowedClassIds: ["fang"],
+    description: "Blood Scent feeds more ability meter.",
+    effectText: "+5% Blood Scent charge",
+    apply: (modifiers) => {
+      modifiers.fangBloodScentChargeBonus += 0.05;
+    }
+  },
+  {
+    id: "longer-reach",
+    name: "Longer Reach",
+    rarity: "common",
+    allowedClassIds: ["spear"],
+    description: "Spear Thrust reaches farther into the mid-range lane.",
+    effectText: "+10 Spear Thrust range",
+    apply: (modifiers) => {
+      modifiers.spearThrustRangeBonus += 10;
+    }
+  },
+  {
+    id: "sharper-tip",
+    name: "Sharper Tip",
+    rarity: "common",
+    allowedClassIds: ["spear"],
+    description: "Spear Thrust hits harder when the line connects.",
+    effectText: "+8% Spear Thrust damage",
+    apply: (modifiers) => {
+      modifiers.spearThrustDamageMultiplier *= 1.08;
+    }
+  },
+  {
+    id: "faster-thrust",
+    name: "Faster Thrust",
+    rarity: "common",
+    allowedClassIds: ["spear"],
+    description: "Spear Ball recovers from each thrust a little faster.",
+    effectText: "-0.06s Spear Thrust cooldown",
+    apply: (modifiers) => {
+      modifiers.spearThrustCooldownReduction += 0.06;
+    }
+  },
+  {
+    id: "longer-rush",
+    name: "Longer Rush",
+    rarity: "common",
+    allowedClassIds: ["spear"],
+    description: "Spear Rush keeps the extended lance active longer.",
+    effectText: "+0.3s Spear Rush",
+    apply: (modifiers) => {
+      modifiers.spearRushDurationBonus += 0.3;
+    }
+  },
+  {
+    id: "piercing-focus",
+    name: "Piercing Focus",
+    rarity: "uncommon",
+    allowedClassIds: ["spear"],
+    description: "Ideal-range thrusts gain a cleaner damage payoff.",
+    effectText: "+5% ideal range damage",
+    apply: (modifiers) => {
+      modifiers.spearIdealRangeBonus += 0.05;
+    }
+  },
+  {
+    id: "wall-lance",
+    name: "Wall Lance",
+    rarity: "common",
+    allowedClassIds: ["spear"],
+    description: "Lance Ready reaches farther after a wall bounce.",
+    effectText: "+10 Lance Ready range",
+    apply: (modifiers) => {
+      modifiers.spearLanceReadyRangeBonus += 10;
+    }
+  },
+  {
+    id: "sharper-shot",
+    name: "Sharper Shot",
+    rarity: "common",
+    allowedClassIds: ["sniper"],
+    description: "Charged Shots punch harder when they connect.",
+    effectText: "+8% Charged Shot damage",
+    apply: (modifiers) => {
+      modifiers.sniperShotDamageMultiplier *= 1.08;
+    }
+  },
+  {
+    id: "faster-lock",
+    name: "Faster Lock",
+    rarity: "common",
+    allowedClassIds: ["sniper"],
+    description: "Charged Shot aim locks faster before firing.",
+    effectText: "-0.1s Charged Shot lock",
+    apply: (modifiers) => {
+      modifiers.sniperChargeTimeReduction += 0.1;
+    }
+  },
+  {
+    id: "deadeye-focus",
+    name: "Deadeye Focus",
+    rarity: "common",
+    allowedClassIds: ["sniper"],
+    description: "Deadeye Beam hits with more precision force.",
+    effectText: "+8% Deadeye Beam damage",
+    apply: (modifiers) => {
+      modifiers.sniperBeamDamageMultiplier *= 1.08;
+    }
+  },
+  {
+    id: "wider-beam",
+    name: "Wider Beam",
+    rarity: "uncommon",
+    allowedClassIds: ["sniper"],
+    description: "Deadeye Beam cuts a wider line through the arena.",
+    effectText: "+4 Deadeye Beam width",
+    apply: (modifiers) => {
+      modifiers.sniperBeamWidthBonus += 4;
+    }
+  },
+  {
+    id: "scope-discipline",
+    name: "Scope Discipline",
+    rarity: "uncommon",
+    allowedClassIds: ["sniper"],
+    description: "Weakpoint Aim deals more damage to vulnerable targets.",
+    effectText: "+5% Weakpoint damage",
+    apply: (modifiers) => {
+      modifiers.sniperWeakpointBonus += 0.05;
+    }
+  },
+  {
+    id: "quick-scope",
+    name: "Quick Scope",
+    rarity: "common",
+    allowedClassIds: ["sniper"],
+    description: "Deadeye Beam charges more often.",
+    effectText: "+8% ability charge",
+    apply: (modifiers) => {
+      modifiers.abilityChargeMultiplier *= 1.08;
+    }
+  },
+  {
+    id: "longer-link",
+    name: "Longer Link",
+    rarity: "common",
+    allowedClassIds: ["vector"],
+    description: "Vector Lines stay armed a little longer.",
+    effectText: "+0.4s Vector Line duration",
+    apply: (modifiers) => {
+      modifiers.vectorLineDurationBonus += 0.4;
+    }
+  },
+  {
+    id: "sharper-line",
+    name: "Sharper Line",
+    rarity: "common",
+    allowedClassIds: ["vector"],
+    description: "Linked energy lines cut harder when crossed.",
+    effectText: "+8% Vector Line damage",
+    apply: (modifiers) => {
+      modifiers.vectorLineDamageMultiplier *= 1.08;
+    }
+  },
+  {
+    id: "wider-vector-beam",
+    name: "Wider Beam",
+    rarity: "common",
+    allowedClassIds: ["vector"],
+    description: "Vector Lines become easier to clip while crossing.",
+    effectText: "+2 Vector Line width",
+    apply: (modifiers) => {
+      modifiers.vectorLineWidthBonus += 2;
+    }
+  },
+  {
+    id: "web-architect",
+    name: "Web Architect",
+    rarity: "uncommon",
+    allowedClassIds: ["vector"],
+    description: "Vector Web stays active longer.",
+    effectText: "+0.5s Vector Web duration",
+    apply: (modifiers) => {
+      modifiers.vectorWebDurationBonus += 0.5;
+    }
+  },
+  {
+    id: "extra-segment",
+    name: "Extra Segment",
+    rarity: "rare",
+    allowedClassIds: ["vector"],
+    description: "Vector Ball keeps linked segments armed a little longer without increasing screen clutter.",
+    effectText: "+0.25s Vector Line duration",
+    apply: (modifiers) => {
+      modifiers.vectorLineDurationBonus += 0.25;
+    }
+  },
+  {
+    id: "long-geometry",
+    name: "Long Geometry",
+    rarity: "uncommon",
+    allowedClassIds: ["vector"],
+    description: "Long-line damage bonuses start from shorter links.",
+    effectText: "-50 long line bonus threshold",
+    apply: (modifiers) => {
+      modifiers.vectorLongLineThresholdReduction += 50;
+    }
+  },
+  {
+    id: "longer-gate",
+    name: "Longer Gate",
+    rarity: "common",
+    allowedClassIds: ["portal"],
+    description: "Wall portals stay open longer.",
+    effectText: "+0.8s portal duration",
+    apply: (modifiers) => {
+      modifiers.portalDurationBonus += 0.8;
+    }
+  },
+  {
+    id: "quick-rift",
+    name: "Quick Rift",
+    rarity: "common",
+    allowedClassIds: ["portal"],
+    description: "Portal Ball can use linked gates more often.",
+    effectText: "-0.15s teleport cooldown",
+    apply: (modifiers) => {
+      modifiers.portalTeleportCooldownReduction += 0.15;
+    }
+  },
+  {
+    id: "sharp-exit",
+    name: "Sharp Exit",
+    rarity: "common",
+    allowedClassIds: ["portal"],
+    description: "Rift Strike hits harder after teleporting.",
+    effectText: "+1 Rift Strike damage",
+    apply: (modifiers) => {
+      modifiers.portalRiftStrikeBonusDamage += 1;
+    }
+  },
+  {
+    id: "stable-gate",
+    name: "Stable Gate",
+    rarity: "uncommon",
+    allowedClassIds: ["portal"],
+    description: "Portal Ball is briefly safer after warping.",
+    effectText: "+5% post-teleport guard",
+    apply: (modifiers) => {
+      modifiers.portalPostTeleportReductionBonus += 0.05;
+    }
+  },
+  {
+    id: "rift-tempo",
+    name: "Rift Tempo",
+    rarity: "common",
+    allowedClassIds: ["portal"],
+    description: "Rift Gate charges more often.",
+    effectText: "+8% ability charge",
+    apply: (modifiers) => {
+      modifiers.abilityChargeMultiplier *= 1.08;
+    }
+  },
+  {
+    id: "wide-portal",
+    name: "Wide Portal",
+    rarity: "uncommon",
+    allowedClassIds: ["portal"],
+    description: "Linked portals are easier for Portal Ball to enter.",
+    effectText: "+4 portal radius",
+    apply: (modifiers) => {
+      modifiers.portalRadiusBonus += 4;
+    }
+  },
+  {
     id: "stronger-prism",
     name: "Stronger Prism",
     rarity: "common",

@@ -93,7 +93,7 @@ export const ShieldClass: FighterClass = {
 
   modifyIncomingDamage({ amount, self, kind, source, game }: DamageContext): number {
     const active = Number(self.customState[SHIELD_TIMER] ?? 0) > 0;
-    if (kind === "burn" || kind === "poison") {
+    if (kind === "burn" || kind === "poison" || kind === "bleed") {
       const reduction = active ? BALANCE.shield.guardBurnReduction : BALANCE.shield.burnTickReduction;
       return amount * (1 - reduction);
     }

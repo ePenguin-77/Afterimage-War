@@ -239,6 +239,11 @@ function getOpponentRecommendations(classId: string): string[] {
     berserker: ["Burst before rage", "Contact reduction", "Avoid low HP trades"],
     drill: ["Keep distance", "DoT pressure", "Avoid armor reliance"],
     ninja: ["Contact reduction", "AoE pressure", "Projectile evasion bypass"],
+    fang: ["Impact Guard", "Status Filter", "Keep distance"],
+    spear: ["Long-range pressure", "Burst damage", "Avoid narrow lanes"],
+    sniper: ["Melee pressure", "Projectile plating", "Close distance"],
+    vector: ["Avoid line crossings", "Burst before web", "Movement control"],
+    portal: ["Predict exits", "Punish contact", "Sustained pressure"],
     glass: ["Sustained pressure", "DoT pressure", "Force charges down"]
   };
   return recommendations[classId] ?? ["Reliable damage", "Damage reduction", "Ability charge"];
